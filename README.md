@@ -20,19 +20,19 @@ Payments are **simulated** (marked "Demo" everywhere) until Stripe is connected.
 
 ```bash
 npm install
+npx convex env set CLERK_JWT_ISSUER_DOMAIN <clerk frontend api url>  # once per deployment
 npx convex dev                      # creates/links a Convex dev deployment, keep it running
-node scripts/setup-convex-auth.mjs  # once per deployment: auth signing keys + SITE_URL
-echo "NEXT_PUBLIC_CONVEX_URL=<url from .env.local>" > apps/web/.env.local
+# apps/web/.env.local: NEXT_PUBLIC_CONVEX_URL, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY
 npm run dev -w apps/web             # http://localhost:3000
-EXPO_PUBLIC_CONVEX_URL=<same url> npm start -w apps/mobile
+EXPO_PUBLIC_CONVEX_URL=<same url> EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=<key> npm start -w apps/mobile
 npm test                            # split math tests
 ```
 
 ## Deploy
 
 ```bash
-npx convex deploy                                                   # backend to the prod deployment
-node scripts/setup-convex-auth.mjs --prod https://tip.jrbussard.com # once
+npx convex env set --prod CLERK_JWT_ISSUER_DOMAIN <clerk frontend api url> # once
+npx convex deploy                                                          # backend to the prod deployment
 ```
 
-The web app deploys on Vercel from `main` (project `tip-jar`, root `apps/web`) with `NEXT_PUBLIC_CONVEX_URL` set to the prod Convex URL. Mobile test builds: `cd apps/mobile && eas build --profile preview`.
+The web app deploys on Vercel from `main` (project `tip-jar`, root `apps/web`) with `NEXT_PUBLIC_CONVEX_URL` set to the prod Convex URL, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Mobile test builds: `cd apps/mobile && eas build --profile preview`.

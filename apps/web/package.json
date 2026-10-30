@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.23",
     "next": "16.4.3",
     "qrcode.react": "^4.2.0",
     "react": "19.3.0",

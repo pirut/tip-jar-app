@@ -1,14 +1,13 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 
 export async function currentWorker(ctx: QueryCtx): Promise<Doc<"workers"> | null> {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) return null;
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) return null;
   return await ctx.db
     .query("workers")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
     .unique();
 }
 

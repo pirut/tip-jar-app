@@ -3,11 +3,17 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "env": { "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud" }
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsudGlwLmpyYnVzc2FyZC5jb20k"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud" }
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsudGlwLmpyYnVzc2FyZC5jb20k"
+      }
     }
   },
   "submit": { "production": {} }

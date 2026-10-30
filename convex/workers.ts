@@ -1,4 +1,3 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { currentWorker } from "./helpers";
@@ -9,8 +8,8 @@ const RESERVED = new Set(["app", "api", "login", "signup", "admin", "settings", 
 export const me = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) return null;
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
     const worker = await currentWorker(ctx);
     return { signedIn: true as const, worker };
   },
@@ -53,8 +52,8 @@ export const saveProfile = mutation({
     workplace: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new ConvexError("Sign in first.");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Sign in first.");
     const handle = args.handle.trim().toLowerCase();
     const name = args.name.trim();
     if (!name) throw new ConvexError("Add your name.");
@@ -72,6 +71,6 @@ export const saveProfile = mutation({
       await ctx.db.patch(existing._id, fields);
       return existing._id;
     }
-    return await ctx.db.insert("workers", { userId, ...fields });
+    return await ctx.db.insert("workers", { tokenIdentifier: identity.tokenIdentifier, ...fields });
   },
 });
