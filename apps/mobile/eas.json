@@ -3,11 +3,11 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "env": { "EXPO_PUBLIC_CONVEX_URL": "SET_ME" }
+      "env": { "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud" }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_CONVEX_URL": "SET_ME" }
+      "env": { "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud" }
     }
   },
   "submit": { "production": {} }
