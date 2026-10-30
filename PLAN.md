@@ -71,17 +71,16 @@ A **small platform fee on each tip**, on top of card fees, collected as a Connec
 - Square and Adyen also do Tap to Pay. Stripe is the pick because Connect handles splitting and payouts to many people in one platform.
 
 ### Money ledger
-Every cent moves through our own append-only ledger (Postgres) that mirrors Stripe: `tip_received → pool → share_allocated → transfer → payout`. That gives us auditability, group dispute answers ("why did I get $41.12?"), and clean company reports.
+Every cent moves through our own append-only ledger (Convex) that mirrors Stripe: `tip_received → pool → share_allocated → transfer → payout`. That gives us auditability, group dispute answers ("why did I get $41.12?"), and clean company reports.
 
 ## 4. Tech stack
 
 | Layer | Choice | Why |
 |---|---|---|
 | Worker app | **React Native (Expo)**, TypeScript | One codebase for iOS + Android; Stripe Terminal has a React Native SDK |
-| Tip web page | **Next.js** on Vercel | Loads instantly from an NFC tap; Apple Pay / Google Pay on the web |
+| Tip web page | **Next.js** on Vercel at tip.jrbussard.com | Loads instantly from an NFC tap; Apple Pay / Google Pay on the web |
 | Company dashboard | Same Next.js app, `/company` routes | One web codebase |
-| API | Next.js API routes or a small Node/TypeScript service | Same language end to end |
-| Database | **Postgres** (Supabase or Neon) | Ledger needs real transactions; Supabase adds auth + realtime for live pool totals |
+| Backend + database | **Convex** | Transactional functions for the tip ledger, realtime pool totals, auth (Convex Auth), scheduled crew auto-close |
 | Auth | Phone number + SMS code (workers), email (company admins) | Workers shouldn't need passwords |
 | Payments | Stripe Terminal + Connect + webhooks | See above |
 | Notifications | Expo push | "You got a $10 tip", "Group closed, you made $84" |

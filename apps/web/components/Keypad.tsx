@@ -1,0 +1,15 @@
+"use client";
+
+const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "del"];
+
+export function Keypad({ onKey }: { onKey: (k: string) => void }) {
+  return (
+    <div className="keypad">
+      {KEYS.map((k) => (
+        <button key={k} type="button" onClick={() => onKey(k)} aria-label={k === "del" ? "Delete" : k}>
+          {k === "del" ? "⌫" : k}
+        </button>
+      ))}
+    </div>
+  );
+}

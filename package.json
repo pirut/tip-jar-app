@@ -1,0 +1,21 @@
+{
+  "name": "tip-jar",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:backend": "convex dev",
+    "deploy:backend": "convex deploy",
+    "setup:auth": "node scripts/setup-convex-auth.mjs",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "typecheck": "tsc -p convex --noEmit && npm run typecheck -w apps/web && npm run typecheck -w apps/mobile"
+  },
+  "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "^0.0.96",
+    "convex": "^1.49.0"
+  },
+  "devDependencies": {
+    "jose": "^5.9.6",
+    "typescript": "~5.9.3"
+  }
+}
