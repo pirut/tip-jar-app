@@ -1,23 +1,20 @@
 import { useState } from "react";
 import { View } from "react-native";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { Btn, ErrorText, Field, Title } from "./ui";
+import { useHostedAuth } from "@clerk/expo/hosted-auth";
+import { Btn, ErrorText, Title } from "./ui";
 
 export function AuthScreen() {
-  const { signIn } = useAuthActions();
-  const [flow, setFlow] = useState<"signUp" | "signIn">("signUp");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const { startHostedAuth } = useHostedAuth();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function submit() {
+  async function open(mode: "sign-up" | "sign-in") {
     setError("");
     setBusy(true);
     try {
-      await signIn("password", { email, password, flow });
+      await startHostedAuth({ mode });
     } catch {
-      setError(flow === "signIn" ? "That email and password don't match." : "Couldn't create the account. Use a password of 8+ characters, or sign in.");
+      setError("Couldn't sign you in. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -25,12 +22,10 @@ export function AuthScreen() {
 
   return (
     <View style={{ gap: 14 }}>
-      <Title>{flow === "signUp" ? "Start getting tipped" : "Welcome back"}</Title>
-      <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
-      <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete={flow === "signUp" ? "new-password" : "current-password"} />
+      <Title>Start getting tipped</Title>
       <ErrorText>{error}</ErrorText>
-      <Btn kind="primary" title={flow === "signUp" ? "Create account" : "Sign in"} onPress={submit} disabled={busy || !email || password.length < 8} />
-      <Btn kind="ghost" title={flow === "signUp" ? "I already have an account" : "Create a new account"} onPress={() => setFlow(flow === "signUp" ? "signIn" : "signUp")} />
+      <Btn kind="primary" title="Create account" onPress={() => open("sign-up")} disabled={busy} />
+      <Btn kind="ghost" title="I already have an account" onPress={() => open("sign-in")} disabled={busy} />
     </View>
   );
 }

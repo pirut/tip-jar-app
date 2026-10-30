@@ -24,7 +24,9 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "@clerk/expo",
+      "expo-web-browser"
     ],
     "scheme": "tipjar",
     "extra": {

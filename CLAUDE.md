@@ -3,7 +3,7 @@
 Tipping app for service workers (valets, golf cart attendants). Guests tip by QR code or Tap to Pay on the worker's phone; workers can pool tips in a day "crew"; companies (later) run pools and tip payouts. Product decisions and roadmap: PLAN.md (section 7 lists decisions already made; don't re-ask them).
 
 ## Layout
-- `convex/`: backend (Convex). Schema in `convex/schema.ts`, auth via Convex Auth (Password provider), money helpers in `convex/lib/money.ts`, split math in `convex/lib/split.ts`. `convex/_generated` is committed; regenerate with `npx convex dev` after schema/function changes.
+- `convex/`: backend (Convex). Schema in `convex/schema.ts`, auth via Clerk (`convex/auth.config.ts`, workers keyed by `tokenIdentifier`), money helpers in `convex/lib/money.ts`, split math in `convex/lib/split.ts`. `convex/_generated` is committed; regenerate with `npx convex dev` after schema/function changes.
 - `apps/web`: Next.js (App Router) on Vercel at tip.jrbussard.com. `/<handle>` is the public guest tip page, `/app` is the worker dashboard. Imports backend code via the `@convex/*` path alias.
 - `apps/mobile`: Expo app (SDK 58) for workers, single `App.tsx` + `src/`. Imports backend code by relative path (`../../convex/...`). Install native deps with `npx expo install`.
 - `tests/`: node:test unit tests (`npm test`).
@@ -20,15 +20,15 @@ npm workspaces: run `npm install` at the repo root only.
 ## Commands
 ```bash
 npx convex dev                       # dev backend, writes .env.local (gitignored)
-npm run dev -w apps/web              # needs apps/web/.env.local with NEXT_PUBLIC_CONVEX_URL
-EXPO_PUBLIC_CONVEX_URL=... npm start -w apps/mobile
+npm run dev -w apps/web              # needs apps/web/.env.local with NEXT_PUBLIC_CONVEX_URL, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY
+EXPO_PUBLIC_CONVEX_URL=... EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=... npm start -w apps/mobile
 npm test                             # split math
 npm run typecheck                    # convex + web + mobile
 npx convex deploy                    # prod backend
-node scripts/setup-convex-auth.mjs [--prod] <site url>   # once per deployment
+npx convex env set [--prod] CLERK_JWT_ISSUER_DOMAIN <clerk frontend api url>   # once per deployment
 ```
 
 ## Deploy
-- Web: Vercel project `tip-jar` (team "pirut's projects"), root `apps/web`, production branch `main`, env `NEXT_PUBLIC_CONVEX_URL` = prod Convex URL.
-- Mobile: EAS (`apps/mobile/eas.json`, profiles `preview` and `production`), env `EXPO_PUBLIC_CONVEX_URL`.
+- Web: Vercel project `tip-jar` (team "pirut's projects"), root `apps/web`, production branch `main`, env `NEXT_PUBLIC_CONVEX_URL` = prod Convex URL, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
+- Mobile: EAS (`apps/mobile/eas.json`, profiles `preview` and `production`), env `EXPO_PUBLIC_CONVEX_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`.
 - Work on branches and open PRs into `main`.

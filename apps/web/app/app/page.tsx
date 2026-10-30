@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useConvexAuth, useQuery } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useClerk } from "@clerk/nextjs";
 import { api } from "@convex/_generated/api";
 import { SignIn } from "@/components/SignIn";
 import { ProfileForm } from "@/components/ProfileForm";
@@ -16,7 +16,7 @@ type Tab = "tips" | "crew" | "earn";
 export default function WorkerApp() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const me = useQuery(api.workers.me, isAuthenticated ? {} : "skip");
-  const { signOut } = useAuthActions();
+  const { signOut } = useClerk();
   const [tab, setTab] = useState<Tab>("tips");
   const [editing, setEditing] = useState(false);
 

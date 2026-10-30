@@ -8,11 +8,9 @@
  * @module
  */
 
-import type * as auth from "../auth.js";
 import type * as crews from "../crews.js";
 import type * as earnings from "../earnings.js";
 import type * as helpers from "../helpers.js";
-import type * as http from "../http.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_split from "../lib/split.js";
 import type * as tips from "../tips.js";
@@ -25,11 +23,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  auth: typeof auth;
   crews: typeof crews;
   earnings: typeof earnings;
   helpers: typeof helpers;
-  http: typeof http;
   "lib/money": typeof lib_money;
   "lib/split": typeof lib_split;
   tips: typeof tips;

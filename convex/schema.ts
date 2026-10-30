@@ -1,5 +1,4 @@
 import { defineSchema, defineTable } from "convex/server";
-import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 export const splitMode = v.union(
@@ -10,18 +9,16 @@ export const splitMode = v.union(
 );
 
 export default defineSchema({
-  ...authTables,
-
   // A person who receives tips. One per signed-in user.
   workers: defineTable({
-    userId: v.id("users"),
+    tokenIdentifier: v.string(), // from the Clerk identity
     name: v.string(),
     // Public handle for the tip page: tip.jrbussard.com/<handle>
     handle: v.string(),
     jobTitle: v.string(),
     workplace: v.string(),
   })
-    .index("by_user", ["userId"])
+    .index("by_token", ["tokenIdentifier"])
     .index("by_handle", ["handle"]),
 
   tips: defineTable({

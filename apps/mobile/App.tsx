@@ -2,9 +2,10 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import * as SecureStore from "expo-secure-store";
 import { ConvexReactClient, useConvexAuth, useQuery } from "convex/react";
-import { ConvexAuthProvider, useAuthActions } from "@convex-dev/auth/react";
+import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { ClerkProvider, useAuth } from "@clerk/expo";
+import { tokenCache } from "@clerk/expo/token-cache";
 import { api } from "../../convex/_generated/api";
 import { useColors } from "./src/theme";
 import { AuthScreen } from "./src/AuthScreen";
@@ -16,18 +17,14 @@ import { Avatar, Body, Btn, Card, Row, Title } from "./src/ui";
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, { unsavedChangesWarning: false });
 
-const secureStorage = {
-  getItem: SecureStore.getItemAsync,
-  setItem: SecureStore.setItemAsync,
-  removeItem: SecureStore.deleteItemAsync,
-};
-
 export default function App() {
   return (
     <SafeAreaProvider>
-      <ConvexAuthProvider client={convex} storage={Platform.OS === "web" ? localStorage : secureStorage}>
-        <Root />
-      </ConvexAuthProvider>
+      <ClerkProvider publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!} tokenCache={tokenCache}>
+        <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+          <Root />
+        </ConvexProviderWithClerk>
+      </ClerkProvider>
     </SafeAreaProvider>
   );
 }
@@ -39,7 +36,7 @@ function Root() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const me = useQuery(api.workers.me, isAuthenticated ? {} : "skip");
   const inCrew = useInCrew();
-  const { signOut } = useAuthActions();
+  const { signOut } = useAuth();
   const [tab, setTab] = useState<Tab>("tips");
   const [editing, setEditing] = useState(false);
   const [askJoin, setAskJoin] = useState(false);

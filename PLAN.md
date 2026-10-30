@@ -80,7 +80,7 @@ Every cent moves through our own append-only ledger (Convex) that mirrors Stripe
 | Worker app | **React Native (Expo)**, TypeScript | One codebase for iOS + Android; Stripe Terminal has a React Native SDK |
 | Tip web page | **Next.js** on Vercel at tip.jrbussard.com | Loads instantly from an NFC tap; Apple Pay / Google Pay on the web |
 | Company dashboard | Same Next.js app, `/company` routes | One web codebase |
-| Backend + database | **Convex** | Transactional functions for the tip ledger, realtime pool totals, auth (Convex Auth), scheduled crew auto-close |
+| Backend + database | **Convex** | Transactional functions for the tip ledger, realtime pool totals, auth (Clerk), scheduled crew auto-close |
 | Auth | Phone number + SMS code (workers), email (company admins) | Workers shouldn't need passwords |
 | Payments | Stripe Terminal + Connect + webhooks | See above |
 | Notifications | Expo push | "You got a $10 tip", "Group closed, you made $84" |
