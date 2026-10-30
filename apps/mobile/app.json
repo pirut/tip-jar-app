@@ -26,6 +26,12 @@
     "plugins": [
       "expo-secure-store"
     ],
-    "scheme": "tipjar"
+    "scheme": "tipjar",
+    "extra": {
+      "eas": {
+        "projectId": "626c4e68-ac04-4d72-b6b7-4eac93e82e13"
+      }
+    },
+    "owner": "jrbussard"
   }
 }
