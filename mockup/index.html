@@ -182,7 +182,7 @@ select { padding: 10px; border: 1px solid var(--line); border-radius: 10px; back
 <script>
 const $ = (c) => '$' + (c / 100).toFixed(2).replace(/\.00$/, '');
 const $2 = (c) => '$' + (c / 100).toFixed(2);
-const fee = (c) => Math.round(c * 0.029) + 30; // example card fee, not real pricing
+const fee = (c) => Math.round(c * 0.029) + 30 + 25; // example card fee + 25¢ Tip Jar fee, not real pricing
 const initials = (n) => n.replace(/^You \(|\)$/g, '').split(' ').map(w => w[0]).join('').slice(0, 2);
 const clock = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -266,7 +266,7 @@ function guestView() {
           <p class="small">to Marcus at The Harbor Hotel valet</p>
           <div class="perf"></div>
           <div class="row between small"><span>Charged to Apple Pay</span><span class="amt">${$2(total)}</span></div>
-          ${g.cover ? `<div class="row between small muted"><span>Card fee you covered</span><span class="amt">${$2(fee(g.amount))}</span></div>` : ''}
+          ${g.cover ? `<div class="row between small muted"><span>Fees you covered</span><span class="amt">${$2(fee(g.amount))}</span></div>` : ''}
         </div>
         <button class="btn" data-act="g-receipt">Email me a receipt</button>
       </div>
@@ -284,6 +284,7 @@ function guestView() {
         <span class="chip"><span class="dot"></span>On shift now</span>
       </div>
     </div>
+    <p class="small muted" style="margin-top:-6px">Marcus shares tips with his crew today.</p>
     ${g.other ? `
       <div class="stack" style="gap:8px">
         <div class="row between"><span class="eyebrow">Custom amount</span><button class="btn ghost" style="width:auto;padding:4px" data-act="g-presets">Back to presets</button></div>
@@ -291,10 +292,10 @@ function guestView() {
         ${keypad()}
       </div>` : `
       <div class="presets">${presets}<button class="preset other" data-act="g-other" aria-pressed="false">Other</button></div>`}
-    <div class="toggle"><span>Cover the ${amt ? $2(fee(amt)) : ''} card fee so Marcus gets the full ${amt ? $(amt) : 'tip'}</span><button class="switch" role="switch" aria-label="Cover card fee" aria-checked="${g.cover}" data-act="g-cover"></button></div>
+    <div class="toggle"><span>Cover the ${amt ? $2(fee(amt)) : ''} in fees so Marcus gets the full ${amt ? $(amt) : 'tip'}</span><button class="switch" role="switch" aria-label="Cover fees" aria-checked="${g.cover}" data-act="g-cover"></button></div>
     <div style="margin-top:auto" class="stack">
       <button class="btn pay" data-act="g-pay" ${amt ? '' : 'disabled'}>Pay ${amt ? $2(amt + (g.cover ? fee(amt) : 0)) : ''} with ${icon.apple}Pay</button>
-      <p class="small muted" style="text-align:center">No app or account needed. Opened by tapping Marcus's badge.</p>
+      <p class="small muted" style="text-align:center">No app or account needed. Opened by scanning Marcus's QR code.</p>
     </div>
   </div>`);
 }
@@ -391,7 +392,7 @@ function crewTab() {
       <span class="small">in the pool · ${ms.length} people · closes 11:00 PM</span>
     </div>
     <div class="stack"><span class="lbl">How to split</span><div class="seg">${seg}</div>
-      ${bad ? `<p class="small warn">Percents add to ${pctTotal()}%. They need to add to 100%.</p>` : `<p class="small muted">${{ even: 'Same amount for everyone.', hours: 'Based on time each person spent in the crew.', shares: 'Weighted by role. Lead 1.5, valet 1, runner 0.5.', custom: 'Fixed percent per person.' }[c.mode]} Changing this needs everyone's OK.</p>`}
+      ${bad ? `<p class="small warn">Percents add to ${pctTotal()}%. They need to add to 100%.</p>` : `<p class="small muted">${{ even: 'Same amount for everyone.', hours: 'Based on time each person spent in the crew.', shares: 'Weighted by role. Lead 1.5, valet 1, runner 0.5.', custom: 'Fixed percent per person.' }[c.mode]} Only Dani, who started the crew, can change this. The demo lets you try it.</p>`}
     </div>
     <div class="list">${rows}</div>
     <button class="btn primary" data-act="c-close" ${bad ? 'disabled' : ''}>Close crew and split now</button>
@@ -420,7 +421,7 @@ function earnTab() {
         <div class="item"><span>Fri (today)</span><span class="amt">${$2(soloTotal())}</span></div>
       </div>
     </div>
-    <div class="card small"><b>Harbor Hotel</b> also pays your wages here. Next paycheck Oct 31.</div>
+    <div class="card small"><b>Harbor Hotel</b> sends your pooled tips and bonuses here. Next payout Oct 31.</div>
   </div>`;
 }
 function sheet() {
@@ -465,8 +466,8 @@ const STAFF = [
 ];
 function coView() {
   const o = S.co;
-  const tips = STAFF.reduce((a, r) => a + r[4], 0), wages = STAFF.reduce((a, r) => a + r[5], 0);
-  const rows = STAFF.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td class="r">${r[3]}</td><td class="r">${$2(r[4])}</td><td class="r">${$2(r[5])}</td><td class="r"><b>${$2(r[4] + r[5])}</b></td></tr>`).join('');
+  const tips = STAFF.reduce((a, r) => a + r[4], 0), hrs = STAFF.reduce((a, r) => a + r[3], 0);
+  const rows = STAFF.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td class="r">${r[3]}</td><td class="r">${$2(r[4] / r[3])}</td><td class="r"><b>${$2(r[4])}</b></td></tr>`).join('');
   const modes = [['even', 'Even'], ['hours', 'By hours'], ['shares', 'By role shares'], ['custom', 'Custom %']];
   return `<div class="dash">
     <div class="dash-head">
@@ -475,19 +476,19 @@ function coView() {
     </div>
     <div class="kpis">
       <div class="kpi"><span class="eyebrow">Tips collected</span><span class="mid">${$2(tips)}</span><span class="small muted">612 tips · guests covered the card fee on 71%</span></div>
-      <div class="kpi"><span class="eyebrow">Wages owed</span><span class="mid">${$2(wages)}</span><span class="small muted">From clock-ins at 2 locations</span></div>
+      <div class="kpi"><span class="eyebrow">Tips per hour</span><span class="mid">${$2(tips / hrs)}</span><span class="small muted">${hrs} hours clocked at 2 locations</span></div>
       <div class="kpi"><span class="eyebrow">People</span><span class="mid">${STAFF.length}</span><span class="small muted">All verified for payouts</span></div>
     </div>
-    ${o.paid ? `<div class="banner"><span>Sent ${$2(tips + wages)} to ${STAFF.length} people. Debit-card payouts land in minutes, bank accounts in 1–2 business days. Tip report exported for payroll taxes.</span><span class="ok">Paid</span></div>`
-      : o.confirm ? `<div class="banner"><span>Pay ${STAFF.length} people ${$2(tips + wages)} from your Tip Jar balance (funded from Chase ••0931)?</span><span class="row"><button class="btn inline" data-act="co-cancel">Cancel</button><button class="btn primary inline" data-act="co-pay">Confirm and pay</button></span></div>`
-      : `<div class="banner"><span>Payroll for Oct 16 – 31 is ready to send.</span><button class="btn primary inline" data-act="co-confirm">Run payroll</button></div>`}
+    ${o.paid ? `<div class="banner"><span>Sent ${$2(tips)} in pooled tips to ${STAFF.length} people. Debit-card payouts land in minutes, bank accounts in 1–2 business days. Export the CSV for your payroll so tips get reported.</span><span class="ok">Paid</span></div>`
+      : o.confirm ? `<div class="banner"><span>Send ${STAFF.length} people their ${$2(tips)} in pooled tips?</span><span class="row"><button class="btn inline" data-act="co-cancel">Cancel</button><button class="btn primary inline" data-act="co-pay">Confirm and send</button></span></div>`
+      : `<div class="banner"><span>Tip payouts for Oct 16 – 31 are ready to send. Wages stay in your current payroll for now.</span><button class="btn primary inline" data-act="co-confirm">Send tip payouts</button></div>`}
     <div class="grid2">
       <div class="card stack" style="min-width:0">
-        <div class="row between"><h3>Tips and wages by person</h3><button class="btn inline" data-act="co-export" style="padding:8px 12px;font-size:13px">${o.exported ? 'Exported ✓' : 'Export CSV'}</button></div>
+        <div class="row between"><h3>Tips by person</h3><button class="btn inline" data-act="co-export" style="padding:8px 12px;font-size:13px">${o.exported ? 'Exported ✓' : 'Export CSV'}</button></div>
         <div class="tbl-wrap"><table>
-          <thead><tr><th>Name</th><th>Location</th><th>Role</th><th class="r">Hrs</th><th class="r">Tips</th><th class="r">Wages</th><th class="r">Total</th></tr></thead>
+          <thead><tr><th>Name</th><th>Location</th><th>Role</th><th class="r">Hrs</th><th class="r">Per hr</th><th class="r">Tips</th></tr></thead>
           <tbody>${rows}</tbody>
-          <tfoot><tr><td colspan="4">Total</td><td class="r">${$2(tips)}</td><td class="r">${$2(wages)}</td><td class="r">${$2(tips + wages)}</td></tr></tfoot>
+          <tfoot><tr><td colspan="3">Total</td><td class="r">${hrs}</td><td class="r">${$2(tips / hrs)}</td><td class="r">${$2(tips)}</td></tr></tfoot>
         </table></div>
       </div>
       <div class="card stack" style="gap:14px">
@@ -506,15 +507,15 @@ function coView() {
 
 /* ---------- Notes ---------- */
 const NOTES = {
-  guest: { h: 'What a guest sees', lede: 'The guest taps the NFC sticker on Marcus’s badge (or scans its QR). A web page opens: no app, no account. Pick an amount, pay with Apple Pay, done.',
-    steps: ['Tap a preset or “Other”.', 'Try the “cover the card fee” switch.', 'Pay, then see the claim-ticket receipt.'],
-    ask: ['Are $5 / $10 / $20 the right presets for valet? Golf carts?', 'Should the guest see the crew (“Tipping the Harbor valet crew”) or always one person?', 'Should covering the fee default on or off?'] },
+  guest: { h: 'What a guest sees', lede: 'The guest scans the QR code on Marcus’s badge card. A web page opens: no app, no account. Pick an amount, pay with Apple Pay, done.',
+    steps: ['Tap a preset or “Other”.', 'Try the “cover the fees” switch.', 'Pay, then see the claim-ticket receipt.'],
+    ask: ['$5 / $10 / $20 presets for every job type.', 'Guests see the person they tip, with a note that tips are shared with the crew.', 'Cover-the-fees switch starts on. Fees include a small Tip Jar fee.', 'Printable QR codes at launch; NFC badges later.'] },
   work: { h: 'The attendant app', lede: 'Marcus’s phone is the card reader. One big button, type an amount (or let the guest choose), the guest taps their card or phone. After a tip lands, the app offers to join today’s crew.',
     steps: ['Tips: Accept a tip → Charge → Simulate guest tap.', 'Join the crew from the sheet that pops up.', 'Crew: switch Even / Hours / Shares / Custom % and edit numbers to watch the split change. Close it.', 'Earnings: cash out instantly.'],
-    ask: ['Is “crew” the right word, or group / team / stand?', 'Who should be allowed to change how a crew splits?', 'Should tips before you join stay yours (as here), or join the pool too?'] },
-  co: { h: 'For companies', lede: 'Operators set tip pool rules per location, see tips and wages for every person, and pay everyone from one place. Tip reports export for payroll taxes.',
-    steps: ['Change the pool rules and save.', 'Run payroll and confirm.', 'Export the CSV.'],
-    ask: ['Do companies pay wages through Tip Jar, or only tips?', 'Which payroll tools do your target companies use (Gusto, ADP, Paychex)?', 'Sell to companies first, or to workers first?'] },
+    ask: ['It’s called a crew.', 'Only the crew starter can change the split.', 'Tips from before you join stay yours.'] },
+  co: { h: 'For companies', lede: 'Operators set tip pool rules per location, see tips for every person, and send tip payouts from one place. Tip reports export as CSV for payroll taxes.',
+    steps: ['Change the pool rules and save.', 'Send tip payouts and confirm.', 'Export the CSV.'],
+    ask: ['Tips only for now; wages through Tip Jar later.', 'CSV export first; payroll integration after talking to companies.', 'Launch with one pilot operator whose workers also use it on their own. US only.'] },
 };
 function notesView() {
   const n = NOTES[S.role];
@@ -522,7 +523,7 @@ function notesView() {
     <h1>${n.h}</h1>
     <p class="lede">${n.lede}</p>
     <div class="card stack"><span class="eyebrow">Try this</span><ol>${n.steps.map(s => `<li>${s}</li>`).join('')}</ol></div>
-    <div class="card ask stack"><span class="eyebrow">Tell me what you think</span><ul>${n.ask.map(s => `<li>${s}</li>`).join('')}</ul></div>
+    <div class="card ask stack"><span class="eyebrow">Decided</span><ul>${n.ask.map(s => `<li>${s}</li>`).join('')}</ul></div>
     <p class="small muted">Everything here is mock data. Payments are not real.</p>
   </aside>`;
 }
