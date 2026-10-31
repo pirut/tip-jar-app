@@ -1,17 +1,15 @@
 import Link from "next/link";
+import { Logo } from "@/components/Brand";
 
 export default function NotFound() {
   return (
-    <main className="page">
-      <Link className="wordmark" href="/">Tip Jar</Link>
-      <div className="stack grow" style={{ justifyContent: "center", gap: 18 }}>
-        <div className="ticket">
-          <span className="ticket-no">TIP CLAIM № ——————</span>
-          <h2 style={{ marginTop: 10 }}>We couldn&apos;t find that person</h2>
-          <p className="small" style={{ marginTop: 6 }}>Check the QR code or link and try again.</p>
-        </div>
+    <div className="center-page">
+      <div className="site-head"><Logo /></div>
+      <main className="center-body">
+        <h1 className="t-title">We couldn&apos;t find that person</h1>
+        <p className="muted">Check the QR code or link and try again.</p>
         <Link className="btn" href="/">Go to Tip Jar</Link>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
