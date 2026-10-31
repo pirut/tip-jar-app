@@ -19,7 +19,7 @@ Separate charges and transfers, for solo workers and crews alike. Not destinatio
 - The platform is merchant of record. Guests see Tip Jar on their statement.
 - Connected accounts use Accounts v2 with only the recipient configuration. Workers just see "Set up payouts"; the account is created behind the scenes and Stripe collects identity and bank details on its own pages. Settings: `dashboard: "express"`, `fees_collector` and `losses_collector` both `application`, `stripe_balance.stripe_transfers` requested. Stripe requires exactly this for recipient-only accounts.
 - `on_behalf_of` is not used. Recipient accounts can't take it. No `application_fee_amount`: our fee is what we don't transfer.
-- Accounts v2 has to be switched on for the platform in the Dashboard. Until then `STRIPE_CONNECT_API=v1` creates the same recipient setup with v1 controller properties, which is what the sandbox uses today.
+- **Not available yet.** The platform profile has to agree: Accounts v2 enabled, platform-held negative-balance liability acknowledged, Express for workers. The sandbox profile currently says the opposite on each, and its v2 request is only "Requested". Stripe's current API rejects these accounts, so this model can't go live until the owner decides on that liability and Stripe accepts it. Sandbox tests use `STRIPE_CONNECT_API=v1`, the same setup as v1 controller properties on an API version pinned to `2026-07-29.dahlia`. That fallback isn't a route to live.
 - **The platform carries the risk.** Refunds, chargebacks, dispute fees and any negative worker balance debit the platform. Keep working capital in the Stripe balance and don't withdraw everything.
 
 ### Where a tip's money goes
@@ -135,6 +135,7 @@ Nothing real happens unless every gate passes, and all are checked on the server
 | `STRIPE_MODE` set and the key prefix matches it (`test`: `sk_test_`/`rk_test_`; `live`: `sk_live_`/`rk_live_`) | `lib/stripeEnv.ts`, every Stripe call | Unset: demo only |
 | Global controls: `chargesEnabled`, `transfersEnabled`, limits | `paymentControls` | No row: everything off |
 | Worker enrolled | `pilotEnrollments`, internal functions only | Not enrolled: demo |
+| Platform profile allows recipient accounts (see above) | Stripe, at account creation | Currently refused on the current API |
 | Worker's `stripe_transfers` capability `active`, not frozen | `payeeAccounts`, re-checked with Stripe before charging and transferring | Not ready: guest sees "can't take tips yet" |
 | Limits | per tip $100, per worker $500/day, all workers $2,500/day | Can be tightened per worker |
 

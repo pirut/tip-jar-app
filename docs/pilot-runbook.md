@@ -11,7 +11,11 @@ Nothing in this list is done yet for live mode.
 **In the Stripe Dashboard, live account**
 
 1. Finish activating the account: business details, bank account, statement descriptor. Guests' statements will show this name, so use "TIP JAR" or similar.
-2. Connect → Platform profile: **complete the loss-liability acknowledgement and enable Accounts v2.** Stripe's current API refuses to create workers without this. Be sure about it: it makes the platform responsible for refunds, chargebacks and negative worker balances. Stripe says this setup suits platforms with experience in this area, so it may ask questions.
+2. Connect → Platform profile has to match this model. As of 2026-10-31 the sandbox's profile doesn't: it says sellers collect payments directly, Stripe carries negative-balance liability, and sellers get the full Stripe Dashboard, and its Accounts v2 request still reads "Requested". What this pilot needs:
+   - Funds flow: the platform takes payments and pays sellers separately (separate charges and transfers).
+   - Negative-balance liability: the platform. **This is the owner's decision.** It makes the platform pay for refunds, chargebacks and negative worker balances. Stripe says this setup suits platforms with experience in this area, and asks for an acknowledgement and possibly verification.
+   - Dashboard for workers: Express.
+   - Accounts v2: enabled, not just requested. Check by creating a test account, since "Requested" doesn't let it through.
 3. Settings → Payouts: **set the platform's own payouts to manual.** On automatic, Stripe would sweep worker money to your bank.
 4. Settings → Payment methods: cards, Apple Pay and Google Pay only. The code excludes Klarna, Affirm and Afterpay; other bank or delayed methods stay off.
 5. Connect → Tax reporting: set up 1099 reporting for the year.
@@ -39,7 +43,7 @@ A restricted key (`rk_`) with write access to: Checkout Sessions, PaymentIntents
 | `STRIPE_WEBHOOK_SECRET` | From the platform endpoint below |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | From the Connect endpoint below |
 | `TIP_ORIGIN` | `https://tip-jar-dev.testing.jrbussard.com` on dev, `https://tip.jrbussard.com` on production |
-| `STRIPE_CONNECT_API` | Leave unset. `v1` is a fallback for a sandbox without Accounts v2; Stripe's newer API rejects it for new accounts |
+| `STRIPE_CONNECT_API` | Leave unset for anything live. `v1` is a test-only fallback for a sandbox without Accounts v2. It pins an older API version, and Stripe's current one rejects it |
 | `OPS_ALERT_WEBHOOK_URL` | Optional. Slack-style URL for alerts |
 
 ## Webhook endpoints
