@@ -491,6 +491,54 @@ test("a crash after Stripe made the transfer doesn't pay twice", async () => {
   assert.equal(w.rows("ledgerEntries").filter((e) => e.ref.startsWith("transfer:")).length, 1);
 });
 
+test("a crash, then a refund that changes the amount, still doesn't pay twice", async () => {
+  await on();
+  const payee = await pilot("t", "ann-a");
+  const { tipId, chargeId } = await paidTip("ann-a");
+  w.advance(24 * HOUR);
+  f.knobs.crashAfterTransfer = true;
+  await settle();
+  assert.equal(f.transfers.size, 1);
+  f.refund(chargeId, 542);
+  await w.act(paymentsNode.syncPaymentById, null, { tipPaymentId: tipId });
+  assert.equal(allocs()[0].targetCents, 500);
+  w.advance(HOUR);
+  await settle();
+  await settle();
+  assert.equal(f.transfers.size, 1, "no second transfer");
+  assert.equal(allocs()[0].paidCents, 500, "the extra came back");
+  assert.equal(f.balances.get(payee.stripeAccountId).available, 500);
+  assert.equal(books().workerLiabilityCents, 0);
+});
+
+test("a Stripe webhook about a transfer we never wrote down records it", async () => {
+  await on();
+  await pilot("t", "ann-a");
+  await paidTip("ann-a");
+  w.advance(24 * HOUR);
+  f.knobs.crashAfterTransfer = true;
+  await settle();
+  const [transfer] = [...f.transfers.values()];
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "transfer", transferId: transfer.id }) });
+  assert.equal(allocs()[0].paidCents, 1000);
+  w.advance(HOUR);
+  await settle();
+  assert.equal(f.transfers.size, 1);
+});
+
+test("a failure setting the payout schedule is fixed on the next visit", async () => {
+  await on();
+  await w.profile("t", "ann-a");
+  await w.call(ops.enrollWorker, null, { handle: "ann-a" });
+  const update = f.client.balanceSettings.update;
+  f.client.balanceSettings.update = async () => { throw new Error("stripe is down"); };
+  await assert.rejects(w.act(paymentsNode.startPayoutSetup, "t"), /down/);
+  f.client.balanceSettings.update = update;
+  await w.act(paymentsNode.startPayoutSetup, "t");
+  assert.equal(w.rows("payeeAccounts").length, 1);
+  assert.equal(f.payoutSchedules[w.rows("payeeAccounts")[0].stripeAccountId].interval, "weekly");
+});
+
 test("a run that dies mid-call is picked up after the timeout, without paying twice", async () => {
   await on();
   await pilot("t", "ann-a");
@@ -994,6 +1042,44 @@ test("the books separate worker money from platform money, and safe-to-withdraw 
   assert.equal(b.lastReconciliation.availableCents, 1084 - stripeFee);
   assert.equal(b.safeToWithdrawCents, 84 - stripeFee, "the worker's 1000 isn't ours to take");
   assert.deepEqual(b.lastReconciliation.problems, []);
+  assert.equal(b.lastReconciliation.differenceCents, 0);
+});
+
+test("the owner taking money out or adding it keeps the books matching Stripe", async () => {
+  await on();
+  await pilot("t", "ann-a");
+  await paidTip("ann-a", 1000);
+  f.extra.balance = -40;
+  f.payouts.set("po_owner", { id: "po_owner", amount: 40, status: "paid", livemode: false });
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: "po_owner" }) });
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: "po_owner" }) });
+  await w.act(paymentsNode.reconcileBooks);
+  const b = await w.call(ops.books);
+  assert.equal(b.ownerWithdrawalsCents, 40);
+  assert.equal(b.lastReconciliation.differenceCents, 0);
+  assert.equal(b.workerLiabilityCents, 1000, "taking money out doesn't change what workers are owed");
+  f.payouts.set("po_owner", { id: "po_owner", amount: 40, status: "failed", livemode: false });
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: "po_owner" }) });
+  assert.equal((await w.call(ops.books)).ownerWithdrawalsCents, 0);
+});
+
+test("a difference from Stripe is a warning, not an alarm", async () => {
+  await on();
+  await pilot("t", "ann-a");
+  await paidTip("ann-a", 1000);
+  f.extra.balance = -200; // A monthly Connect fee, say.
+  await w.act(paymentsNode.reconcileBooks);
+  const alert = w.rows("opsAlerts").find((a) => a.kind === "books_difference");
+  assert.equal(alert.severity, "warning");
+});
+
+test("workers being owed more than Stripe holds is an alarm", async () => {
+  await on();
+  await pilot("t", "ann-a");
+  await paidTip("ann-a", 1000);
+  f.extra.balance = -1000;
+  await w.act(paymentsNode.reconcileBooks);
+  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "books_mismatch" && a.severity === "critical"));
 });
 
 test("a charge on Stripe with no record here raises an alarm", async () => {

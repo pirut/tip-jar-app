@@ -4,6 +4,7 @@
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { raiseAlert } from "./lib/paymentsDb";
 import { activeMembership, resolveWorkerByHandle } from "./helpers";
 import { enrollmentFor, getControls, payeeFor, rebalanceTip, allocateSolo } from "./lib/paymentsDb";
 import { ledgerTotals, safeToWithdraw, type LedgerRow } from "./lib/paymentRules";
@@ -183,17 +184,17 @@ export const saveReconciliation = internalMutation({
     workerLiabilityCents: v.number(),
     platformRevenueCents: v.number(),
     safeToWithdrawCents: v.number(),
+    differenceCents: v.number(),
     problems: v.array(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("reconciliations", { ...args, at: Date.now() });
+    const ref = new Date().toISOString().slice(0, 10);
     if (args.problems.length > 0) {
-      await ctx.runMutation(internal.payments.alert, {
-        kind: "books_mismatch",
-        severity: "critical",
-        message: args.problems.join(" "),
-        ref: new Date().toISOString().slice(0, 10),
-      });
+      await raiseAlert(ctx, { kind: "books_mismatch", severity: "critical", message: args.problems.join(" "), ref });
+    }
+    if (args.differenceCents !== 0) {
+      await raiseAlert(ctx, { kind: "books_difference", severity: "warning", message: `Stripe's balance differs from the books by ${args.differenceCents} cents. Check for Connect fees or manual activity.`, ref });
     }
   },
 });

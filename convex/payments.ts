@@ -396,6 +396,25 @@ export const upsertPayout = internalMutation({
   },
 });
 
+// The owner taking money out, or putting it in, so the books still match Stripe's balance.
+export const recordPlatformMovement = internalMutation({
+  args: { kind: v.union(v.literal("payout"), v.literal("topup")), stripeObjectId: v.string(), amountCents: v.number(), status: v.string(), livemode: v.boolean() },
+  handler: async (ctx, { kind, stripeObjectId, amountCents, status, livemode }) => {
+    const base = { livemode, stripeObjectId, amountCents };
+    if (kind === "topup") {
+      if (status === "succeeded") await post(ctx, { ...base, ref: `topup:${stripeObjectId}`, debit: "stripe_balance", credit: "owner_capital" });
+      return;
+    }
+    if (status === "paid" || status === "in_transit") {
+      await post(ctx, { ...base, ref: `platform-payout:${stripeObjectId}`, debit: "owner_withdrawals", credit: "stripe_balance" });
+    } else if (status === "failed" || status === "canceled") {
+      // Only undo one we'd booked. The money came back to the balance.
+      const booked = await ctx.db.query("ledgerEntries").withIndex("by_ref", (q) => q.eq("ref", `platform-payout:${stripeObjectId}`)).first();
+      if (booked) await post(ctx, { ...base, ref: `platform-payout-back:${stripeObjectId}`, debit: "stripe_balance", credit: "owner_withdrawals" });
+    }
+  },
+});
+
 // Webhooks
 
 export const recordEvent = internalMutation({

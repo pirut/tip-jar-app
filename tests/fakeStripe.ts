@@ -26,6 +26,8 @@ export function fakeStripe() {
   const payoutSchedules: Record<string, any> = {};
   const payouts = new Map<string, any>();
   const calls: string[] = [];
+  const extra = { balance: 0 };
+  const topups = new Map<string, any>();
   const knobs = { failTransfer: null as null | Error, failReversal: null as null | Error, crashAfterTransfer: false };
 
   const accountBody = (a: any) => ({
@@ -59,7 +61,7 @@ export function fakeStripe() {
     balance: {
       retrieve: async (_params: any, options: any) => {
         if (!options?.stripeAccount) {
-          const total = [...charges.values()].reduce((a, c) => a + c.amount - c.amount_refunded - c.fee, 0) - [...transfers.values()].reduce((a, t) => a + t.amount - t.amount_reversed, 0);
+          const total = extra.balance + [...charges.values()].reduce((a, c) => a + c.amount - c.amount_refunded - c.fee, 0) - [...transfers.values()].reduce((a, t) => a + t.amount - t.amount_reversed, 0);
           return { available: [{ amount: total, currency: "usd" }], pending: [] };
         }
         const b = balances.get(options.stripeAccount) ?? { available: 0, pending: 0 };
@@ -127,6 +129,7 @@ export function fakeStripe() {
       },
     },
     payouts: { retrieve: async (payoutId: string) => payouts.get(payoutId) },
+    topups: { retrieve: async (topupId: string) => topups.get(topupId) },
   };
 
   const chargeBody = (chargeId: string) => {
@@ -136,6 +139,8 @@ export function fakeStripe() {
 
   return {
     client,
+    extra,
+    topups,
     calls,
     knobs,
     accounts,

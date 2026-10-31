@@ -37,7 +37,7 @@ export const releaseStuck = internalMutation({
 
 type Claim =
   | { action: "skip"; reason: string }
-  | { action: "transfer"; amountCents: number; offsetCents: number; idempotencyKey: string; destination: string; transferGroup: string; sourceCharge?: string; retry: boolean; livemode: boolean; tipPaymentId: string }
+  | { action: "transfer"; amountCents: number; offsetCents: number; idempotencyKey: string; destination: string; transferGroup: string; sourceCharge?: string; retry: boolean; knownTransferIds: string[]; livemode: boolean; tipPaymentId: string }
   | { action: "reverse"; plan: { transferId: string; amountCents: number; idempotencyKey: string }[]; uncoveredCents: number };
 
 export const claimAllocation = internalMutation({
@@ -101,6 +101,7 @@ export const claimAllocation = internalMutation({
       // dispute: that money came back into the platform's balance.
       sourceCharge: a.transfers.length === 0 && tip.disputedCents === 0 ? tip.stripeChargeId : undefined,
       retry: a.attempts > 0,
+      knownTransferIds: a.transfers.map((t) => t.id),
       livemode: tip.livemode,
       tipPaymentId: tip._id,
     };
@@ -217,7 +218,8 @@ export const observeTransfer = internalMutation({
       return { recorded: false };
     }
     const known = a.transfers.find((t) => t.id === args.transferId);
-    if (!known) return { recorded: false, unknown: a.state === "in_flight" };
+    // A transfer we made but never wrote down, because a run died between the two.
+    if (!known) return { recorded: false, unknown: true };
     if (args.reversedCents > known.reversedCents) {
       const delta = args.reversedCents - known.reversedCents;
       await ctx.db.patch(a._id, {

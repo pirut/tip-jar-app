@@ -292,6 +292,7 @@ export default defineSchema({
     workerLiabilityCents: v.number(),
     platformRevenueCents: v.number(),
     safeToWithdrawCents: v.number(),
+    differenceCents: v.number(),
     problems: v.array(v.string()),
   }).index("by_at", ["at"]),
 });

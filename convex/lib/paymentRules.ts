@@ -157,13 +157,13 @@ export function adjustmentPostings(netDelta: number, feeDelta: number) {
   return rows;
 }
 
-export type LedgerAccount = "stripe_balance" | "worker_liability" | "platform_fees" | "processing_cost" | "dispute_fees";
+export type LedgerAccount = "stripe_balance" | "worker_liability" | "platform_fees" | "processing_cost" | "dispute_fees" | "owner_withdrawals" | "owner_capital";
 
 export type LedgerRow = { debit: LedgerAccount; credit: LedgerAccount; amountCents: number };
 
 // Debit-positive balance per account, then the figures the owner needs.
 export function ledgerTotals(rows: LedgerRow[]) {
-  const balance: Record<LedgerAccount, number> = { stripe_balance: 0, worker_liability: 0, platform_fees: 0, processing_cost: 0, dispute_fees: 0 };
+  const balance: Record<LedgerAccount, number> = { stripe_balance: 0, worker_liability: 0, platform_fees: 0, processing_cost: 0, dispute_fees: 0, owner_withdrawals: 0, owner_capital: 0 };
   for (const r of rows) {
     balance[r.debit] += r.amountCents;
     balance[r.credit] -= r.amountCents;
@@ -171,7 +171,7 @@ export function ledgerTotals(rows: LedgerRow[]) {
   const workerLiabilityCents = 0 - balance.worker_liability;
   const feesCollectedCents = 0 - balance.platform_fees;
   const platformRevenueCents = feesCollectedCents - balance.processing_cost - balance.dispute_fees;
-  return { expectedStripeBalanceCents: balance.stripe_balance, workerLiabilityCents, feesCollectedCents, processingCostCents: balance.processing_cost, disputeFeesCents: balance.dispute_fees, platformRevenueCents };
+  return { expectedStripeBalanceCents: balance.stripe_balance, workerLiabilityCents, feesCollectedCents, processingCostCents: balance.processing_cost, disputeFeesCents: balance.dispute_fees, platformRevenueCents, ownerWithdrawalsCents: balance.owner_withdrawals, ownerCapitalCents: 0 - balance.owner_capital };
 }
 
 // What can leave the platform's Stripe balance without touching worker money or the reserve.

@@ -7,6 +7,8 @@ export type EventTarget =
   | { kind: "payout"; stripeAccountId: string; payoutId: string }
   | { kind: "balance"; stripeAccountId: string }
   | { kind: "transfer"; allocationId?: string; transferId: string }
+  | { kind: "platform_payout"; payoutId: string }
+  | { kind: "platform_topup"; topupId: string }
   | { kind: "ignore" };
 
 type EventLike = { type: string; account?: string; data: { object: any } };
@@ -37,6 +39,9 @@ export function eventTarget(event: EventLike): EventTarget {
   if (type.startsWith("payout.") && event.account) {
     return { kind: "payout", stripeAccountId: event.account, payoutId: o.id };
   }
+  // With no connected account, it's the owner's own money moving.
+  if (type.startsWith("payout.")) return { kind: "platform_payout", payoutId: o.id };
+  if (type.startsWith("topup.")) return { kind: "platform_topup", topupId: o.id };
   if (type === "balance.available" && event.account) {
     return { kind: "balance", stripeAccountId: event.account };
   }

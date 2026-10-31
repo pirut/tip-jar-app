@@ -132,7 +132,10 @@ export const startPayoutSetup = action({
       });
       const saved = await ctx.runQuery(internal.payments.payeeForToken, { tokenIdentifier: identity.tokenIdentifier });
       stripeAccountId = saved!.stripeAccountId;
-      // Daily payouts cost more than a tip's fee earns; see docs/payments-architecture.md.
+    }
+    // Daily payouts cost more than a tip's fee earns; see docs/payments-architecture.md. Set on every
+    // visit so a failure here last time gets fixed, and never over a freeze.
+    if (!existing?.payoutsPaused) {
       await stripe().balanceSettings.update({ payments: { payouts: { schedule: payoutSchedule() } } }, { stripeAccount: stripeAccountId });
     }
     // Stripe only offers the update flow once onboarding has been finished.
@@ -229,6 +232,8 @@ export const createGuestCheckout = action({
         success_url: `${origin}/${target.handle}?paid={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/${target.handle}`,
         expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+        // Pay-later on a tip adds dispute risk and no value to a guest. Cards and wallets stay.
+        excluded_payment_method_types: ["klarna", "affirm", "afterpay_clearpay"],
         integration_identifier: "tipjar_qr_tjqrgues",
       },
       { idempotencyKey: `checkout:${r.tipPaymentId}` },
@@ -368,6 +373,16 @@ async function handleTarget(ctx: ActionCtx, target: EventTarget) {
       await syncBalance(ctx, target.stripeAccountId);
       return;
     }
+    case "platform_payout": {
+      const payout = await stripe().payouts.retrieve(target.payoutId);
+      await ctx.runMutation(internal.payments.recordPlatformMovement, { kind: "payout", stripeObjectId: payout.id, amountCents: payout.amount, status: payout.status, livemode: payout.livemode });
+      return;
+    }
+    case "platform_topup": {
+      const topup = await stripe().topups.retrieve(target.topupId);
+      await ctx.runMutation(internal.payments.recordPlatformMovement, { kind: "topup", stripeObjectId: topup.id, amountCents: topup.amount, status: topup.status, livemode: topup.livemode });
+      return;
+    }
     case "transfer": {
       const transfer = await stripe().transfers.retrieve(target.transferId);
       const allocationId = target.allocationId ?? transfer.metadata?.allocationId;
@@ -415,12 +430,13 @@ export const processEvent = internalAction({
 
 const BATCH = 25;
 
-async function runTransfer(ctx: ActionCtx, allocationId: Id<"allocations">, claim: { amountCents: number; idempotencyKey: string; destination: string; transferGroup: string; sourceCharge?: string; retry: boolean; tipPaymentId: string }) {
+async function runTransfer(ctx: ActionCtx, allocationId: Id<"allocations">, claim: { amountCents: number; idempotencyKey: string; destination: string; transferGroup: string; sourceCharge?: string; retry: boolean; knownTransferIds: string[]; tipPaymentId: string }) {
   const s = stripe();
-  // Stripe forgets idempotency keys after a while, so a retry first looks for what an earlier run did.
+  // A retry first looks for what an earlier run did. Keys alone aren't enough: Stripe forgets them after
+  // a while, and if a refund changed the amount since, the key differs and it'd pay twice.
   if (claim.retry) {
     const earlier = await s.transfers.list({ transfer_group: claim.transferGroup, limit: 100 });
-    const match = earlier.data.find((t) => t.metadata?.allocationId === allocationId && t.metadata?.idempotencyKey === claim.idempotencyKey);
+    const match = earlier.data.find((t) => t.metadata?.allocationId === allocationId && !claim.knownTransferIds.includes(t.id));
     if (match) {
       await ctx.runMutation(internal.settlement.completeTransfer, { allocationId, transferId: match.id, amountCents: match.amount, destination: typeof match.destination === "string" ? match.destination : match.destination?.id ?? "" });
       return;
@@ -438,7 +454,7 @@ async function runTransfer(ctx: ActionCtx, allocationId: Id<"allocations">, clai
       currency: "usd",
       destination: claim.destination,
       ...(claim.sourceCharge ? { source_transaction: claim.sourceCharge } : { transfer_group: claim.transferGroup }),
-      metadata: { allocationId, tipPaymentId: claim.tipPaymentId, idempotencyKey: claim.idempotencyKey },
+      metadata: { allocationId, tipPaymentId: claim.tipPaymentId },
     },
     { idempotencyKey: claim.idempotencyKey },
   );
@@ -547,9 +563,8 @@ export const reconcileBooks = internalAction({
     if (availableCents + pendingCents < totals.workerLiabilityCents) {
       problems.push(`Stripe holds ${availableCents + pendingCents}, but workers are owed ${totals.workerLiabilityCents}.`);
     }
-    if (availableCents + pendingCents !== totals.expectedStripeBalanceCents) {
-      problems.push(`Stripe balance ${availableCents + pendingCents} differs from the books' ${totals.expectedStripeBalanceCents}. Other activity on the account, or something unrecorded.`);
-    }
+    // Stripe also debits things we don't book per tip, like monthly Connect fees, so a difference is worth a look but isn't alarming alone.
+    const differenceCents = availableCents + pendingCents - totals.expectedStripeBalanceCents;
     const since = Math.floor(Date.now() / 1000) - 2 * 24 * 60 * 60;
     const intents = await s.paymentIntents.list({ created: { gte: since }, limit: 100 });
     const paid = intents.data.filter((p) => p.status === "succeeded");
@@ -565,6 +580,7 @@ export const reconcileBooks = internalAction({
       workerLiabilityCents: totals.workerLiabilityCents,
       platformRevenueCents: totals.platformRevenueCents,
       safeToWithdrawCents: safeToWithdraw({ availableCents, workerLiabilityCents: totals.workerLiabilityCents, reserveCents }),
+      differenceCents,
       problems,
     });
     return { problems };

@@ -85,6 +85,7 @@ const client = {
     createReversal: async (id: string, p: any, o: any) => cli("post", `/v1/transfers/${id}/reversals`, p, o),
   },
   payouts: { retrieve: async (id: string, _p: any, o: any) => cli("get", `/v1/payouts/${id}`, {}, o) },
+  topups: { retrieve: async (id: string) => cli("get", `/v1/topups/${id}`) },
 };
 
 const whoami = cli("get", "/v1/account");
@@ -299,6 +300,8 @@ try {
   check(soloAlloc.state === "settled" && soloAlloc.paidCents === 1000, "solo tip transferred");
   const soloTransfer = transferOf(soloAlloc.transfers[0].id);
   check(soloTransfer.destination === annAcct && soloTransfer.amount === 1000 && soloTransfer.source_transaction === tip(solo).stripeChargeId, "transfer has the right amount, recipient and source");
+  // Crash recovery finds earlier transfers by this group, so it has to survive source_transaction.
+  check(soloTransfer.transfer_group === `tip_${solo}`, `transfer keeps the payment's group (${soloTransfer.transfer_group})`);
   step("Transfer to the worker with the charge as its source", { transfer: soloTransfer.id, amount: soloTransfer.amount });
   await w.act(paymentsNode.refreshBalance, "ann");
   const annReal = await w.call(earnings.real, "ann", {});
