@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
-import { useClerk } from "@clerk/nextjs";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useClerk, useUser } from "@clerk/nextjs";
 import { api } from "@convex/_generated/api";
+import { LegalLinks, Logo } from "@/components/Brand";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DemoBar } from "@/components/DemoBar";
-import { LegalLinks } from "@/components/LegalLinks";
+import { IconCrew, IconEarnings, IconTips } from "@/components/Icons";
 import { SignIn } from "@/components/SignIn";
 import { ProfileForm } from "@/components/ProfileForm";
 import { TipsTab } from "@/components/TipsTab";
@@ -13,28 +15,44 @@ import { CrewTab } from "@/components/CrewTab";
 import { EarningsTab } from "@/components/EarningsTab";
 import { initials } from "@/lib/format";
 
-type Tab = "tips" | "crew" | "earn";
+type Tab = "tips" | "crew" | "earn" | "profile";
 
 const TABS: [Tab, string, React.ReactNode][] = [
-  ["tips", "Tips", <path key="i" d="M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Zm2-4h12l2 4H4l2-4Zm6 8v4m-2-2h4" />],
-  ["crew", "Crew", <path key="i" d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8c0-3 2.7-5 6-5s6 2 6 5m1-8a3 3 0 0 0 0-6m2 9c2 .6 3 2.200 3 5" />],
-  ["earn", "Earnings", <path key="i" d="M5 20v-6m7 6V9m7 11V4" />],
+  ["tips", "Tips", <IconTips key="i" />],
+  ["crew", "Crew", <IconCrew key="i" />],
+  ["earn", "Earnings", <IconEarnings key="i" />],
 ];
 
 const tabFromUrl = (): Tab => {
   const params = new URLSearchParams(window.location.search);
   if (params.has("join")) return "crew";
   const t = params.get("tab");
-  return t === "crew" || t === "earn" ? t : "tips";
+  return t === "crew" || t === "earn" || t === "profile" ? t : "tips";
 };
+
+// Deleting takes two steps: Tip Jar's data, then the Clerk sign-in. "failed" means only the first worked.
+type Deletion = "data" | "signin" | "failed" | null;
+
+function Loading() {
+  return (
+    <main className="onboard" aria-busy="true" aria-label="Loading">
+      <div className="skel" style={{ width: 96, height: 24 }} />
+      <div className="skel" style={{ width: "50%", height: 36 }} />
+      <div className="skel" style={{ height: 240 }} />
+    </main>
+  );
+}
 
 export default function WorkerApp() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const me = useQuery(api.workers.me, isAuthenticated ? {} : "skip");
   const crew = useQuery(api.crews.current, isAuthenticated ? {} : "skip");
+  const removeData = useMutation(api.workers.deleteAccount);
+  const { user } = useUser();
   const { signOut } = useClerk();
   const [tab, setTabState] = useState<Tab>("tips");
-  const [editing, setEditing] = useState(false);
+  const [deletion, setDeletion] = useState<Deletion>(null);
+  const [confirmSignInDeletion, setConfirmSignInDeletion] = useState(false);
 
   // Tabs live in the URL, so reload and the Back button behave.
   useEffect(() => {
@@ -49,57 +67,117 @@ export default function WorkerApp() {
   }, []);
   const leave = () => signOut({ redirectUrl: "/app" });
 
-  if (isLoading || (isAuthenticated && me === undefined))
+  async function deleteSignIn() {
+    setDeletion("signin");
+    try {
+      if (!user) throw new Error("Sign in again to finish deleting your account.");
+      await user.delete();
+      // The session went with the user, so there's nothing left to sign out of.
+      window.location.assign("/app");
+    } catch {
+      setDeletion("failed");
+    }
+  }
+
+  // A failure here means nothing was deleted; ProfileForm shows the reason.
+  async function deleteAccount() {
+    setDeletion("data");
+    try {
+      await removeData({});
+    } catch (e) {
+      setDeletion(null);
+      throw e;
+    }
+    await deleteSignIn();
+  }
+
+  if (deletion === "failed" || deletion === "signin" || (deletion === "data" && !me?.worker))
     return (
-      <main className="page" aria-busy="true">
-        <span className="wordmark">Tip Jar</span>
-        <div className="skel big-line" /><div className="skel tall" />
-      </main>
+      <div className="center-page">
+        <DemoBar />
+        <div className="site-head"><Logo /></div>
+        {deletion === "failed" ? (
+          <main className="center-body" role="alert">
+            <h1 className="t-title">Your account is only partly deleted</h1>
+            <p className="muted">Your Tip Jar profile, tips and cash-outs are gone, but your sign-in account couldn&apos;t be removed. Try again below. If you need to sign in again, choose Delete my sign-in account on the setup screen.</p>
+            <div className="row wrap">
+              <button className="btn primary" onClick={deleteSignIn}>Try again</button>
+              <button className="btn" onClick={leave}>Sign out</button>
+            </div>
+          </main>
+        ) : (
+          <main className="center-body" role="status">
+            <div className="row"><span className="spinner" aria-hidden />Deleting your account…</div>
+          </main>
+        )}
+      </div>
     );
+
+  if (isLoading || (isAuthenticated && me === undefined)) return <Loading />;
   if (!isAuthenticated)
     return (
       <>
         <DemoBar />
-        <main className="page"><a className="wordmark" href="/">Tip Jar</a><SignIn /><LegalLinks /></main>
+        <SignIn />
       </>
     );
   const worker = me?.worker;
-  if (!worker || editing)
+  if (!worker)
     return (
       <>
         <DemoBar />
-        <main className="page">
-          <span className="wordmark">Tip Jar</span>
-          <ProfileForm initial={worker ?? undefined} onDone={() => setEditing(false)} onCancel={worker ? () => setEditing(false) : undefined} onSignOut={leave} />
+        <div className="site-head"><Logo /></div>
+        <main className="onboard">
+          <ProfileForm onSignOut={leave} />
+          <section className="section-line stack">
+            <h2 className="t-sub">Your sign-in account</h2>
+            <p className="muted">No tip profile is connected to this account. You can delete your sign-in account without creating a profile, including after an earlier deletion was interrupted.</p>
+            <button className="btn" onClick={() => setConfirmSignInDeletion(true)}>Delete my sign-in account</button>
+          </section>
+          <ConfirmDialog open={confirmSignInDeletion} title="Delete your sign-in account?" confirmLabel="Delete sign-in account" cancelLabel="Keep account" danger onCancel={() => setConfirmSignInDeletion(false)} onConfirm={() => { setConfirmSignInDeletion(false); void deleteSignIn(); }}>
+            This removes your sign-in account and email from Clerk. This can&apos;t be undone.
+          </ConfirmDialog>
           <LegalLinks />
         </main>
       </>
     );
 
+  const userButton = (
+    <button className="user-btn" onClick={() => setTab("profile")} aria-label="Edit profile">
+      <span className="avatar sm">{initials(worker.name)}</span>
+      <span className="sidebar-name">{worker.name}</span>
+    </button>
+  );
+  const crewStatus = (
+    <button className="status" onClick={() => setTab("crew")}>
+      <span className={crew?.crew ? "dot" : "dot off"} />{crew?.crew ? "In a crew" : "Solo today"}
+    </button>
+  );
+
   return (
     <>
       <DemoBar />
-      <main className="page has-tabs">
-        <div className="row between">
-          <button className="row btn ghost profile-btn" onClick={() => setEditing(true)} aria-label="Edit profile">
-            <span className="avatar sm">{initials(worker.name)}</span><b>{worker.name}</b>
-          </button>
-          <button className="chip" onClick={() => setTab("crew")}>
-            <span className={crew?.crew ? "dot" : "dot off"} />{crew?.crew ? "In crew" : "Solo today"}
-          </button>
-        </div>
-        {tab === "tips" && <TipsTab handle={worker.handle} name={worker.name} />}
-        {tab === "crew" && <CrewTab />}
-        {tab === "earn" && <EarningsTab />}
-      </main>
-      <nav className="tabs" aria-label="Sections">
-        {TABS.map(([k, l, icon]) => (
-          <button key={k} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{icon}</svg>
-            {l}
-          </button>
-        ))}
-      </nav>
+      <div className="shell">
+        <header className="appbar">
+          <Logo href="/app" onNavigate={(e) => { e.preventDefault(); setTab("tips"); }} />
+          <div className="row" style={{ gap: 4 }}>{crewStatus}<button className="user-btn" onClick={() => setTab("profile")} aria-label="Edit profile"><span className="avatar sm">{initials(worker.name)}</span></button></div>
+        </header>
+        <aside className="sidebar">
+          <div className="sidebar-brand"><Logo href="/app" onNavigate={(e) => { e.preventDefault(); setTab("tips"); }} /></div>
+          <nav className="tabs" aria-label="Sections">
+            {TABS.map(([k, l, icon]) => (
+              <button key={k} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>{icon}{l}</button>
+            ))}
+          </nav>
+          <div className="sidebar-foot">{crewStatus}{userButton}<LegalLinks /></div>
+        </aside>
+        <main className="content">
+          {tab === "tips" && <TipsTab handle={worker.handle} name={worker.name} />}
+          {tab === "crew" && <CrewTab />}
+          {tab === "earn" && <EarningsTab />}
+          {tab === "profile" && <ProfileForm initial={worker} email={user?.primaryEmailAddress?.emailAddress} onDone={() => setTab("tips")} onCancel={() => setTab("tips")} onSignOut={leave} onDelete={deleteAccount} />}
+        </main>
+      </div>
     </>
   );
 }
