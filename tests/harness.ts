@@ -32,7 +32,8 @@ export const paymentsNode = await import("../convex/paymentsNode.ts");
 export const settlement = await import("../convex/settlement.ts");
 export const ops = await import("../convex/ops.ts");
 export const paymentsCron = await import("../convex/paymentsCron.ts");
-const modules: Record<string, any> = { crews, workers, tips, earnings, migrations, payments, paymentsNode, settlement, ops, paymentsCron };
+export const reconciliation = await import("../convex/reconciliation.ts");
+const modules: Record<string, any> = { crews, workers, tips, earnings, migrations, payments, paymentsNode, settlement, ops, paymentsCron, reconciliation };
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -200,6 +201,8 @@ export function world({ realClock = false } = {}) {
   let now = START;
   let jobs: { at: number; name: string; args: any }[] = [];
   if (!realClock) Date.now = () => now;
+  // Real Stripe remembers metadata and transfer groups, so ids mustn't repeat from one run to the next.
+  else db.next = Math.floor(Date.now() / 1000) * 1000;
 
   const resolve = (ref: any) => {
     const [file, name] = getFunctionName(ref).split(":");

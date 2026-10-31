@@ -138,7 +138,13 @@ export default defineSchema({
     requirementsDue: v.number(),
     syncedAt: v.number(),
     frozenReason: v.optional(v.string()),
-    payoutsPaused: v.boolean(),
+    payoutsPaused: v.boolean(), // Stripe has confirmed manual payouts. Never set before it has.
+    payoutScheduleDesired: v.union(v.literal("weekly"), v.literal("manual")),
+    payoutScheduleGeneration: v.number(), // bumps when the desired schedule changes, so an older run can't record success
+    payoutScheduleConfirmed: v.optional(v.string()), // the interval Stripe last reported
+    payoutScheduleVerifiedAt: v.optional(v.number()),
+    payoutScheduleAttempts: v.number(), // failures in a row
+    payoutScheduleError: v.optional(v.string()),
     owedCents: v.number(), // reversals Stripe couldn't complete; taken from later transfers
     balanceAvailableCents: v.optional(v.number()),
     balancePendingCents: v.optional(v.number()),
@@ -179,14 +185,24 @@ export default defineSchema({
     stripeFeeCents: v.optional(v.number()),
     cardBrand: v.optional(v.string()),
     paidAt: v.optional(v.number()),
-    snapshotFrom: v.optional(v.number()),
-    refundedCents: v.number(),
+    latestReadToken: v.number(), // the newest Stripe read started; only that read may be applied
+    allocated: v.boolean(),
+    refundedCents: v.number(), // refunds not known to have failed
+    refunds: v.array(v.object({ id: v.string(), amountCents: v.number(), status: v.string() })),
+    failedRefundAckCents: v.number(), // failed refunds a person has dealt with
     disputedCents: v.number(),
     disputeFeeCents: v.number(),
     disputeOpen: v.boolean(),
+    disputeIds: v.array(v.string()),
+    inquiryCents: v.number(),
+    guestHoldCents: v.number(), // see guestHoldCents in lib/paymentRules
+    hasGuestHold: v.boolean(),
+    ledgerSeq: v.number(), // makes each change's ledger ref unique, even when amounts repeat
     postedNetTakenCents: v.number(),
     postedFeesTakenCents: v.number(),
     postedStripeFeeCents: v.optional(v.number()),
+    postedDisputeFeeCents: v.number(),
+    postedReviewHeldCents: v.number(),
     reviewReason: v.optional(v.string()), // the money didn't match; nothing moves until a person looks
   })
     .index("by_worker", ["workerId"])
@@ -194,7 +210,11 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_session", ["stripeCheckoutSessionId"])
     .index("by_intent", ["stripePaymentIntentId"])
-    .index("by_worker_request", ["workerId", "clientRequestId"]),
+    .index("by_charge", ["stripeChargeId"])
+    .index("by_worker_request", ["workerId", "clientRequestId"])
+    .index("by_allocated_status", ["allocated", "status"])
+    .index("by_dispute_open", ["disputeOpen"])
+    .index("by_guest_hold", ["hasGuestHold"]),
 
   // One tip's money for one person. Target minus paid says what Stripe still has to do.
   allocations: defineTable({
@@ -212,7 +232,8 @@ export default defineSchema({
     seq: v.number(), // bumps after each finished Stripe operation; part of the idempotency key
     attempts: v.number(),
     claimedAt: v.optional(v.number()),
-    inFlightOffsetCents: v.optional(v.number()),
+    inFlightOffsetCents: v.optional(v.number()), // debt reserved by this claim; already taken off owedCents
+    shortSince: v.optional(v.number()), // Stripe has refused this reversal for lack of balance since then
     lastError: v.optional(v.string()),
     transfers: v.array(v.object({ id: v.string(), amountCents: v.number(), reversedCents: v.number() })),
   })
@@ -282,17 +303,54 @@ export default defineSchema({
     .index("by_dedupe", ["dedupeKey"])
     .index("by_resolved", ["resolvedAt"]),
 
-  // Daily comparison of our books with Stripe's balance.
+  // Regular comparison of our books with Stripe's balance.
   reconciliations: defineTable({
     at: v.number(),
     livemode: v.boolean(),
     availableCents: v.number(),
     pendingCents: v.number(),
+    connectReservedCents: v.number(),
     expectedStripeBalanceCents: v.number(),
-    workerLiabilityCents: v.number(),
+    openingBalanceCents: v.number(),
+    workerLiabilityCents: v.number(), // net, for the books. Withdrawals use obligationsCents
+    obligationsCents: v.number(),
     platformRevenueCents: v.number(),
     safeToWithdrawCents: v.number(),
     differenceCents: v.number(),
+    platformPayoutInterval: v.optional(v.string()),
     problems: v.array(v.string()),
   }).index("by_at", ["at"]),
+
+  // Every movement on the platform's Stripe balance, one row per balance transaction.
+  balanceTxns: defineTable({
+    txnId: v.string(),
+    created: v.number(), // Stripe's, in seconds
+    type: v.string(),
+    reportingCategory: v.optional(v.string()),
+    amountCents: v.number(),
+    feeCents: v.number(),
+    netCents: v.number(),
+    currency: v.string(),
+    sourceId: v.optional(v.string()),
+    txnClass: v.string(), // BalanceTxnClass
+    state: v.union(v.literal("open"), v.literal("matched"), v.literal("acknowledged")),
+    problem: v.optional(v.string()),
+    tipPaymentId: v.optional(v.id("tipPayments")),
+    allocationId: v.optional(v.id("allocations")),
+    note: v.optional(v.string()),
+    livemode: v.boolean(),
+  })
+    .index("by_txn", ["txnId"])
+    .index("by_state", ["state"]),
+
+  // One row: how far the scan of balance transactions has got.
+  balanceScan: defineTable({
+    key: v.literal("platform"),
+    fromCreated: v.number(), // everything from here on is, or is being, scanned
+    startingAfter: v.optional(v.string()), // set while a scan is part way through its pages
+    scanNewestCreated: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    openingCents: v.optional(v.number()), // the balance before the first transaction we scanned
+    scannedNetCents: v.number(), // sum of every row's net
+  }).index("by_key", ["key"]),
 });

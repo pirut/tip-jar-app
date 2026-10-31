@@ -349,30 +349,37 @@ test("money that doesn't match what we asked for is frozen and never paid out", 
     assert.notEqual(after.status, "succeeded");
   }
   assert.equal(allocs().length, 0);
-  assert.equal(w.rows("ledgerEntries").length, 0);
+  const { workerLiabilityCents, feesCollectedCents, reviewHeldCents } = books();
+  assert.equal(workerLiabilityCents, 0);
+  assert.equal(feesCollectedCents, 0);
+  assert.equal(reviewHeldCents, 99, "only the one that's really ours and in dollars is booked as held");
   assert.ok(w.rows("opsAlerts").some((a) => a.kind === "payment_mismatch" && a.severity === "critical"));
 });
 
-test("an old read can't overwrite a newer one", async () => {
+test("only the newest read to start can be applied", async () => {
   await on();
   await pilot("t", "ann-a");
   const { tipId, piId } = await paidTip("ann-a");
-  const stale = {
-    fetchedFrom: Date.now() - 60_000, paymentIntentId: piId, piStatus: "processing", amountCents: 1084, currency: "usd", livemode: false,
-    metadataTipPaymentId: tipId, refundedCents: 0, disputes: [],
+  const snapshot = {
+    paymentIntentId: piId, piStatus: "processing", amountCents: 1084, currency: "usd", livemode: false,
+    metadataTipPaymentId: tipId, refunds: [], disputes: [],
   };
-  const r = await w.call(payments.applyPaymentSnapshot, null, { tipPaymentId: tipId, snapshot: stale });
-  assert.equal(r.reason, "stale");
+  const older = await w.call(payments.beginPaymentRead, null, { tipPaymentId: tipId });
+  const newer = await w.call(payments.beginPaymentRead, null, { tipPaymentId: tipId });
+  const r = await w.call(payments.applyPaymentSnapshot, null, { tipPaymentId: tipId, readToken: older, snapshot });
+  assert.equal(r.reason, "superseded");
   assert.equal(tipRow(tipId).status, "succeeded");
+  // Applying a token twice isn't an overlap, but a new read after it is.
+  assert.equal((await w.call(payments.applyPaymentSnapshot, null, { tipPaymentId: tipId, readToken: newer, snapshot })).applied, true);
 });
 
 test("a succeeded payment never goes backward", async () => {
   await on();
   await pilot("t", "ann-a");
   const { tipId, piId } = await paidTip("ann-a");
-  w.advance(1000);
-  await w.call(payments.applyPaymentSnapshot, null, { tipPaymentId: tipId, snapshot: {
-    fetchedFrom: Date.now(), paymentIntentId: piId, piStatus: "canceled", amountCents: 1084, currency: "usd", livemode: false, metadataTipPaymentId: tipId, refundedCents: 0, disputes: [],
+  const readToken = await w.call(payments.beginPaymentRead, null, { tipPaymentId: tipId });
+  await w.call(payments.applyPaymentSnapshot, null, { tipPaymentId: tipId, readToken, snapshot: {
+    paymentIntentId: piId, piStatus: "canceled", amountCents: 1084, currency: "usd", livemode: false, metadataTipPaymentId: tipId, refunds: [], disputes: [],
   } });
   assert.equal(tipRow(tipId).status, "succeeded");
 });
@@ -527,17 +534,22 @@ test("a Stripe webhook about a transfer we never wrote down records it", async (
   assert.equal(f.transfers.size, 1);
 });
 
-test("a failure setting the payout schedule is fixed on the next visit", async () => {
+test("a failure setting the payout schedule doesn't stop setup, and is fixed on the next visit", async () => {
   await on();
   await w.profile("t", "ann-a");
   await w.call(ops.enrollWorker, null, { handle: "ann-a" });
   const update = f.client.balanceSettings.update;
   f.client.balanceSettings.update = async () => { throw new Error("stripe is down"); };
-  await assert.rejects(w.act(paymentsNode.startPayoutSetup, "t"), /down/);
+  const { url } = await w.act(paymentsNode.startPayoutSetup, "t");
+  assert.ok(url);
+  assert.equal(w.rows("payeeAccounts")[0].payoutScheduleAttempts, 1);
+  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "payout_schedule_failed" && a.severity === "warning"));
   f.client.balanceSettings.update = update;
   await w.act(paymentsNode.startPayoutSetup, "t");
   assert.equal(w.rows("payeeAccounts").length, 1);
   assert.equal(f.payoutSchedules[w.rows("payeeAccounts")[0].stripeAccountId].interval, "weekly");
+  assert.equal(w.rows("payeeAccounts")[0].payoutScheduleAttempts, 0);
+  assert.ok(w.rows("opsAlerts").every((a) => a.kind !== "payout_schedule_failed" || a.resolvedAt !== undefined));
 });
 
 test("a run that dies mid-call is picked up after the timeout, without paying twice", async () => {
@@ -623,8 +635,9 @@ test("a partial refund takes a fair part from the worker and the fee", async () 
   assert.equal(books().feesCollectedCents, 42);
 });
 
-test("a reversal Stripe can't do: the worker owes it, is frozen, and later tips pay it off", async () => {
+test("a reversal Stripe refuses for a week: the worker owes it, is frozen, and later tips pay it off", async () => {
   await on();
+  f.knobs.connectedReserves = false; // Stripe's documented refusal. The sandbox's recipient accounts go negative instead.
   const payee = await pilot("t", "ann-a");
   const first = await paidTip("ann-a");
   w.advance(24 * HOUR);
@@ -633,10 +646,17 @@ test("a reversal Stripe can't do: the worker owes it, is frozen, and later tips 
   await w.act(paymentsNode.refundTip, null, { tipPaymentId: first.tipId });
   await settle();
   let account = w.rows("payeeAccounts")[0];
-  assert.equal(account.owedCents, 1000);
+  assert.equal(account.owedCents, 0, "not a debt yet: it could still come back");
   assert.ok(account.frozenReason);
   assert.equal(f.payoutSchedules[payee.stripeAccountId].interval, "manual");
   assert.ok(w.rows("opsAlerts").some((a) => a.kind === "reversal_short" && a.severity === "critical"));
+  assert.equal(allocs(first.tipId)[0].state, "due");
+
+  w.advance(8 * DAY);
+  await settle();
+  account = w.rows("payeeAccounts")[0];
+  assert.equal(account.owedCents, 1000);
+  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "reversal_debt" && a.severity === "critical"));
   assert.equal(books().workerLiabilityCents, -1000);
 
   // Frozen workers can't take new tips.
@@ -1050,47 +1070,51 @@ test("the owner taking money out or adding it keeps the books matching Stripe", 
   await on();
   await pilot("t", "ann-a");
   await paidTip("ann-a", 1000);
-  f.extra.balance = -40;
-  f.payouts.set("po_owner", { id: "po_owner", amount: 40, status: "paid", livemode: false });
-  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: "po_owner" }) });
-  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: "po_owner" }) });
+  const payout = f.ownerPayout(40);
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: payout.id }) });
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: payout.id }) });
+  const top = f.topup(500);
   await w.act(paymentsNode.reconcileBooks);
   const b = await w.call(ops.books);
   assert.equal(b.ownerWithdrawalsCents, 40);
+  assert.equal(b.ownerCapitalCents, 500);
   assert.equal(b.lastReconciliation.differenceCents, 0);
   assert.equal(b.workerLiabilityCents, 1000, "taking money out doesn't change what workers are owed");
-  f.payouts.set("po_owner", { id: "po_owner", amount: 40, status: "failed", livemode: false });
-  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: "po_owner" }) });
+  f.payouts.get(payout.id).status = "failed";
+  await w.act(paymentsNode.processEvent, null, { eventId: await record({ kind: "platform_payout", payoutId: payout.id }) });
   assert.equal((await w.call(ops.books)).ownerWithdrawalsCents, 0);
-});
-
-test("a difference from Stripe is a warning, not an alarm", async () => {
-  await on();
-  await pilot("t", "ann-a");
-  await paidTip("ann-a", 1000);
-  f.extra.balance = -200; // A monthly Connect fee, say.
-  await w.act(paymentsNode.reconcileBooks);
-  const alert = w.rows("opsAlerts").find((a) => a.kind === "books_difference");
-  assert.equal(alert.severity, "warning");
+  assert.ok(top);
 });
 
 test("workers being owed more than Stripe holds is an alarm", async () => {
   await on();
   await pilot("t", "ann-a");
   await paidTip("ann-a", 1000);
-  f.extra.balance = -1000;
   await w.act(paymentsNode.reconcileBooks);
-  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "books_mismatch" && a.severity === "critical"));
+  f.ownerPayout(1000);
+  w.advance(HOUR);
+  await w.act(paymentsNode.reconcileBooks);
+  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "books_mismatch" && a.severity === "critical" && a.message.includes("belongs to workers")));
 });
 
 test("a charge on Stripe with no record here raises an alarm", async () => {
   await on();
   await pilot("t", "ann-a");
+  f.outsideCharge(500);
+  await w.act(paymentsNode.reconcileBooks);
+  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "txn_unexplained" && a.severity === "critical" && a.message.includes("no record")));
+});
+
+test("a paid tip whose webhook never came is picked up by reconciliation, with no alarm", async () => {
+  await on();
+  await pilot("t", "ann-a");
   await checkout("ann-a");
   const tip = lastTip();
-  f.pay(tip.stripeCheckoutSessionId); // Paid, but our sync never ran.
+  f.pay(tip.stripeCheckoutSessionId);
   await w.act(paymentsNode.reconcileBooks);
-  assert.ok(w.rows("opsAlerts").some((a) => a.kind === "books_mismatch" && a.message.includes("no record")));
+  assert.equal(lastTip().status, "succeeded");
+  assert.equal(w.rows("opsAlerts").filter((a) => a.severity === "critical").length, 0);
+  assert.equal((await w.call(ops.books)).lastReconciliation.differenceCents, 0);
 });
 
 test("hourly reconciliation picks up what a webhook missed", async () => {

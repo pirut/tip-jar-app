@@ -25,6 +25,7 @@ export function eventTarget(event: EventLike): EventTarget {
   if (type.startsWith("payment_intent.")) {
     return { kind: "payment", tipPaymentId: o.metadata?.tipPaymentId, paymentIntentId: o.id };
   }
+  // refund.failed is how a refund that already looked finished comes back, up to 30 days later.
   if (type.startsWith("charge.dispute.") || type.startsWith("refund.") || type.startsWith("charge.refund.") || type.startsWith("charge.")) {
     const paymentIntentId = idOf(o.payment_intent);
     return paymentIntentId ? { kind: "payment", paymentIntentId, tipPaymentId: o.metadata?.tipPaymentId } : { kind: "ignore" };

@@ -9,7 +9,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { WorkerStage } from "./lib/paymentsDb";
 import type { PaymentSnapshot } from "./lib/paymentRules";
-import { safeToWithdraw, ledgerTotals } from "./lib/paymentRules";
+import { ledgerTotals } from "./lib/paymentRules";
 import { accountStatus, accountStatusV1, eventTarget, usdCents, type EventTarget } from "./lib/stripeEvents";
 import { isLive, requireStripeConfig, supportEmail, tipOrigin } from "./lib/stripeEnv";
 
@@ -24,7 +24,20 @@ function stripe(): Stripe {
   return fake ?? new Stripe(key, { maxNetworkRetries: 2, appInfo: { name: "Tip Jar" } });
 }
 
-const payoutSchedule = (): Stripe.BalanceSettingsUpdateParams.Payments.Payouts.Schedule => ({ interval: "weekly", weekly_payout_days: ["monday"] });
+const payoutSchedule = (desired: "weekly" | "manual"): Stripe.BalanceSettingsUpdateParams.Payments.Payouts.Schedule =>
+  desired === "manual" ? { interval: "manual" } : { interval: "weekly", weekly_payout_days: ["monday"] };
+
+// Every page of a Stripe list. Stripe's lists are newest first and give ids to continue from.
+async function listAll<T extends { id: string }>(page: (startingAfter?: string) => Promise<{ data: T[]; has_more?: boolean }>): Promise<T[]> {
+  const out: T[] = [];
+  let startingAfter: string | undefined;
+  for (;;) {
+    const { data, has_more } = await page(startingAfter);
+    out.push(...data);
+    if (!has_more || data.length === 0) return out;
+    startingAfter = data[data.length - 1].id;
+  }
+}
 
 type WorkerContext = { worker: Doc<"workers">; stage: WorkerStage; payee: Doc<"payeeAccounts"> | null };
 
@@ -131,16 +144,15 @@ export const startPayoutSetup = action({
         ...created.status,
       });
       const saved = await ctx.runQuery(internal.payments.payeeForToken, { tokenIdentifier: identity.tokenIdentifier });
-      stripeAccountId = saved!.stripeAccountId;
+      stripeAccountId = saved!.stripeAccountId as string;
     }
-    // Daily payouts cost more than a tip's fee earns; see docs/payments-architecture.md. Set on every
-    // visit so a failure here last time gets fixed, and never over a freeze.
-    if (!existing?.payoutsPaused) {
-      await stripe().balanceSettings.update({ payments: { payouts: { schedule: payoutSchedule() } } }, { stripeAccount: stripeAccountId });
-    }
+    // Daily payouts cost more than a tip's fee earns; see docs/payments-architecture.md. Checked on
+    // every visit, and it always asks for what the row wants, so a frozen worker stays on manual.
+    const payee: Doc<"payeeAccounts"> | null = existing ?? await ctx.runQuery(internal.payments.payeeForToken, { tokenIdentifier: identity.tokenIdentifier });
+    if (payee) await applyPayoutSchedule(ctx, payee._id);
     // Stripe only offers the update flow once onboarding has been finished.
     const finished = !!existing && existing.transfersStatus === "active";
-    return { url: await accountLinkUrl(stripeAccountId, !finished) };
+    return { url: await accountLinkUrl(stripeAccountId!, !finished) };
   },
 });
 
@@ -181,16 +193,38 @@ export const refreshBalance = action({
   },
 });
 
-export const setPayoutsPaused = internalAction({
-  args: { payeeAccountId: v.id("payeeAccounts"), paused: v.boolean() },
-  handler: async (ctx, { payeeAccountId, paused }) => {
+// Makes Stripe's schedule match the row's desired one, and only records what Stripe confirms. Failures
+// are recorded and retried rather than thrown: nothing retries a scheduled action that throws.
+async function applyPayoutSchedule(ctx: ActionCtx, payeeAccountId: Id<"payeeAccounts">) {
+  for (let pass = 0; pass < 3; pass++) {
     const payee = await ctx.runQuery(internal.payments.payeeById, { payeeAccountId });
     if (!payee) return;
-    await stripe().balanceSettings.update(
-      { payments: { payouts: { schedule: paused ? { interval: "manual" } : payoutSchedule() } } },
-      { stripeAccount: payee.stripeAccountId },
-    );
-    await ctx.runMutation(internal.payments.setPayoutsPausedRecord, { payeeAccountId, paused });
+    const { payoutScheduleDesired: desired, payoutScheduleGeneration: generation, stripeAccountId } = payee;
+    try {
+      const options = { stripeAccount: stripeAccountId };
+      const read = async () => (await stripe().balanceSettings.retrieve({}, options)).payments?.payouts?.schedule?.interval;
+      let interval = await read();
+      // Stripe differing from what it last confirmed means someone else changed it.
+      const drifted = interval !== desired && payee.payoutScheduleConfirmed === desired;
+      if (interval !== desired) {
+        await stripe().balanceSettings.update({ payments: { payouts: { schedule: payoutSchedule(desired) } } }, options);
+        interval = await read();
+        if (interval !== desired) throw new Error(`Stripe reports ${interval} after being asked for ${desired}`);
+      }
+      const { current } = await ctx.runMutation(internal.payments.confirmPayoutSchedule, { payeeAccountId, generation, interval: interval!, drifted });
+      if (current) return;
+      // The desired schedule changed while this ran. Stripe may now have the old one, so go again.
+    } catch (e) {
+      await ctx.runMutation(internal.payments.payoutScheduleFailed, { payeeAccountId, generation, error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+  }
+}
+
+export const enforcePayoutSchedule = internalAction({
+  args: { payeeAccountId: v.id("payeeAccounts") },
+  handler: async (ctx, { payeeAccountId }) => {
+    await applyPayoutSchedule(ctx, payeeAccountId);
   },
 });
 
@@ -251,21 +285,23 @@ export const refreshGuestReceipt = action({
   args: { sessionId: v.string() },
   handler: async (ctx, { sessionId }) => {
     const tip = await ctx.runQuery(internal.payments.tipBySession, { sessionId });
-    if (tip) await syncPayment(ctx, { tipPaymentId: tip._id, sessionId });
+    // A busy payment can lose every read to newer ones. Those will update the receipt, so stay quiet.
+    if (tip) await syncPayment(ctx, { tipPaymentId: tip._id, sessionId }).catch((e) => console.warn(e));
   },
 });
 
 // Reading the truth back from Stripe
 
-async function buildSnapshot(paymentIntentId: string, fetchedFrom: number): Promise<PaymentSnapshot> {
+async function buildSnapshot(paymentIntentId: string): Promise<PaymentSnapshot> {
   const s = stripe();
   const pi = await s.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge.balance_transaction"] });
   const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge : null;
   const txn = charge?.balance_transaction && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
-  const disputes = charge ? await s.disputes.list({ charge: charge.id, limit: 10 }) : { data: [] };
+  const disputes = charge ? await listAll((starting_after) => s.disputes.list({ charge: charge.id, limit: 100, starting_after })) : [];
+  // charge.amount_refunded can't say what happened to each refund. A failed one must count for nothing.
+  const refunds = charge ? await listAll((starting_after) => s.refunds.list({ charge: charge.id, limit: 100, starting_after })) : [];
   const details = charge?.payment_method_details as { card?: { brand?: string | null } } | null | undefined;
   return {
-    fetchedFrom,
     paymentIntentId: pi.id,
     piStatus: pi.status,
     amountCents: pi.amount,
@@ -275,9 +311,9 @@ async function buildSnapshot(paymentIntentId: string, fetchedFrom: number): Prom
     chargeId: charge?.id,
     paidAt: charge ? charge.created * 1000 : undefined,
     stripeFeeCents: txn?.fee ?? undefined,
-    refundedCents: charge?.amount_refunded ?? 0,
+    refunds: refunds.map((r) => ({ id: r.id, amountCents: r.amount, status: r.status ?? "pending" })),
     cardBrand: details?.card?.brand ?? undefined,
-    disputes: disputes.data.map((d) => ({
+    disputes: disputes.map((d) => ({
       id: d.id,
       status: d.status,
       amountCents: d.amount,
@@ -285,6 +321,8 @@ async function buildSnapshot(paymentIntentId: string, fetchedFrom: number): Prom
     })),
   };
 }
+
+const READ_ATTEMPTS = 4;
 
 async function syncPayment(ctx: ActionCtx, a: { tipPaymentId?: string; paymentIntentId?: string; sessionId?: string }) {
   const startedAt = Date.now();
@@ -312,8 +350,18 @@ async function syncPayment(ctx: ActionCtx, a: { tipPaymentId?: string; paymentIn
     }
     return;
   }
-  const snapshot = await buildSnapshot(paymentIntentId, startedAt);
-  await ctx.runMutation(internal.payments.applyPaymentSnapshot, { tipPaymentId: tip._id, snapshot });
+  // Overlapping reads can finish in any order, so only the newest one to start can be applied. A read
+  // that's overtaken starts again. The last one to start always applies, unless its run dies, and then
+  // the thrown error (or the hourly recheck) brings it back.
+  for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 100 * attempt));
+    const readToken = await ctx.runMutation(internal.payments.beginPaymentRead, { tipPaymentId: tip._id });
+    if (readToken === null) return;
+    const snapshot = await buildSnapshot(paymentIntentId);
+    const result = await ctx.runMutation(internal.payments.applyPaymentSnapshot, { tipPaymentId: tip._id, readToken, snapshot });
+    if (result.reason !== "superseded") return;
+  }
+  throw new Error(`Payment ${tip._id} was overtaken by other reads ${READ_ATTEMPTS} times`);
 }
 
 export const syncPaymentById = internalAction({
@@ -376,8 +424,7 @@ async function handleTarget(ctx: ActionCtx, target: EventTarget) {
       return;
     }
     case "platform_payout": {
-      const payout = await stripe().payouts.retrieve(target.payoutId);
-      await ctx.runMutation(internal.payments.recordPlatformMovement, { kind: "payout", stripeObjectId: payout.id, amountCents: payout.amount, status: payout.status, livemode: payout.livemode });
+      await recordOwnerPayout(ctx, await stripe().payouts.retrieve(target.payoutId));
       return;
     }
     case "platform_topup": {
@@ -395,23 +442,51 @@ async function handleTarget(ctx: ActionCtx, target: EventTarget) {
   }
 }
 
-async function observeTransfer(ctx: ActionCtx, allocationId: string, transfer: Stripe.Transfer) {
-  const destination = typeof transfer.destination === "string" ? transfer.destination : transfer.destination?.id ?? "";
-  const seen = await ctx.runMutation(internal.settlement.observeTransfer, {
-    allocationId,
+async function recordOwnerPayout(ctx: ActionCtx, payout: Stripe.Payout) {
+  await ctx.runMutation(internal.payments.recordPlatformMovement, { kind: "payout", stripeObjectId: payout.id, amountCents: payout.amount, status: payout.status, livemode: payout.livemode });
+  const balance = await stripe().balance.retrieve();
+  await ctx.runMutation(internal.payments.checkOwnerPayout, {
+    stripeObjectId: payout.id,
+    amountCents: payout.amount,
+    status: payout.status,
+    automatic: payout.automatic === true,
+    availableCents: usdCents(balance.available),
+    connectReservedCents: usdCents(balance.connect_reserved),
+  });
+}
+
+const destinationOf = (transfer: Stripe.Transfer) => (typeof transfer.destination === "string" ? transfer.destination : transfer.destination?.id ?? "");
+
+// Writes down what Stripe says about one transfer. True if it wasn't on file before.
+async function observeTransfer(ctx: ActionCtx, allocationId: string, transfer: Stripe.Transfer): Promise<boolean> {
+  const fields = { allocationId, transferId: transfer.id, amountCents: transfer.amount, reversedCents: transfer.amount_reversed, destination: destinationOf(transfer) };
+  const seen = await ctx.runMutation(internal.settlement.observeTransfer, fields);
+  if (!seen.unknown) return false;
+  await ctx.runMutation(internal.settlement.completeTransfer, {
+    allocationId: allocationId as Id<"allocations">,
     transferId: transfer.id,
     amountCents: transfer.amount,
-    reversedCents: transfer.amount_reversed,
-    destination,
+    destination: fields.destination,
   });
-  if (seen.unknown) {
-    await ctx.runMutation(internal.settlement.completeTransfer, {
-      allocationId: allocationId as Id<"allocations">,
-      transferId: transfer.id,
-      amountCents: transfer.amount,
-      destination,
-    });
+  // It may have been reversed already, before we ever knew about it.
+  if (transfer.amount_reversed > 0) await ctx.runMutation(internal.settlement.observeTransfer, fields);
+  return true;
+}
+
+// Brings an allocation up to date with Stripe, including transfers an earlier run made but never wrote
+// down. A retrieve is exact for known ids; the list finds the unknown ones. Returns how many were new.
+async function refreshAllocation(ctx: ActionCtx, allocationId: Id<"allocations">, transferGroup: string): Promise<number> {
+  const s = stripe();
+  const a: Doc<"allocations"> | null = await ctx.runQuery(internal.settlement.allocationForAlert, { allocationId });
+  for (const known of a?.transfers ?? []) await observeTransfer(ctx, allocationId, await s.transfers.retrieve(known.id));
+  const inGroup = await listAll((starting_after) => s.transfers.list({ transfer_group: transferGroup, limit: 100, starting_after }));
+  let found = 0;
+  for (const t of inGroup) {
+    if (t.metadata?.allocationId === allocationId && !a?.transfers.some((k: { id: string }) => k.id === t.id)) {
+      if (await observeTransfer(ctx, allocationId, t)) found++;
+    }
   }
+  return found;
 }
 
 export const processEvent = internalAction({
@@ -432,18 +507,11 @@ export const processEvent = internalAction({
 
 const BATCH = 25;
 
-async function runTransfer(ctx: ActionCtx, allocationId: Id<"allocations">, claim: { amountCents: number; idempotencyKey: string; destination: string; transferGroup: string; sourceCharge?: string; retry: boolean; knownTransferIds: string[]; tipPaymentId: string }) {
+async function runTransfer(ctx: ActionCtx, allocationId: Id<"allocations">, claim: { amountCents: number; idempotencyKey: string; destination: string; transferGroup: string; sourceCharge?: string; retry: boolean; tipPaymentId: string }) {
   const s = stripe();
   // A retry first looks for what an earlier run did. Keys alone aren't enough: Stripe forgets them after
   // a while, and if a refund changed the amount since, the key differs and it'd pay twice.
-  if (claim.retry) {
-    const earlier = await s.transfers.list({ transfer_group: claim.transferGroup, limit: 100 });
-    const match = earlier.data.find((t) => t.metadata?.allocationId === allocationId && !claim.knownTransferIds.includes(t.id));
-    if (match) {
-      await ctx.runMutation(internal.settlement.completeTransfer, { allocationId, transferId: match.id, amountCents: match.amount, destination: typeof match.destination === "string" ? match.destination : match.destination?.id ?? "" });
-      return;
-    }
-  }
+  if (claim.retry && (await refreshAllocation(ctx, allocationId, claim.transferGroup)) > 0) return;
   // Stripe's view of the recipient, right before moving the money.
   const status = await syncAccount(ctx, claim.destination);
   if (status.transfersStatus !== "active") {
@@ -464,25 +532,43 @@ async function runTransfer(ctx: ActionCtx, allocationId: Id<"allocations">, clai
     allocationId,
     transferId: transfer.id,
     amountCents: transfer.amount,
-    destination: typeof transfer.destination === "string" ? transfer.destination : transfer.destination?.id ?? "",
+    destination: destinationOf(transfer),
   });
 }
 
-async function runReversal(ctx: ActionCtx, allocationId: Id<"allocations">, plan: { transferId: string; amountCents: number; idempotencyKey: string }[], uncoveredCents: number) {
+// What Stripe says when a connected account can't cover a reversal. The sandbox never returns this for
+// the recipient accounts this pilot uses (they go negative instead), so it's matched by meaning and
+// anything else counts as an ordinary failure. docs/pilot-runbook.md lists this as a live check.
+function isShortBalance(e: unknown): boolean {
+  const { type, code, message } = (e ?? {}) as { type?: string; code?: string; message?: string };
+  if (type !== "StripeInvalidRequestError") return false;
+  return code === "insufficient_funds" || code === "balance_insufficient" || /insufficient (funds|balance)/i.test(message ?? "");
+}
+
+// Reads Stripe's totals first, so what an earlier run or the Dashboard already reversed isn't reversed
+// again, then plans from those. Going negative is a success as far as Stripe is concerned, so the
+// worker's balance gets checked afterwards either way.
+async function runReversal(ctx: ActionCtx, allocationId: Id<"allocations">, claim: { transferGroup: string; destination: string }) {
+  const s = stripe();
+  await refreshAllocation(ctx, allocationId, claim.transferGroup);
+  const { plan, uncoveredCents } = await ctx.runMutation(internal.settlement.planClaimedReversal, { allocationId });
+  let short: string | null = null;
   for (const step of plan) {
     try {
-      const reversal = await stripe().transfers.createReversal(step.transferId, { amount: step.amountCents, metadata: { allocationId } }, { idempotencyKey: step.idempotencyKey });
-      await ctx.runMutation(internal.settlement.recordReversal, { allocationId, transferId: step.transferId, reversalId: reversal.id, amountCents: reversal.amount });
+      await s.transfers.createReversal(step.transferId, { amount: step.amountCents, metadata: { allocationId } }, { idempotencyKey: step.idempotencyKey });
     } catch (e) {
-      if (e instanceof Stripe.errors.StripeInvalidRequestError || (e as { type?: string })?.type === "StripeInvalidRequestError") {
-        // The worker's balance can't cover it. Retrying won't help until they have more.
-        await ctx.runMutation(internal.settlement.reversalShort, { allocationId, amountCents: step.amountCents, reason: (e as Error).message });
-        continue;
-      }
-      throw e;
+      if (!isShortBalance(e)) throw e;
+      short = (e as Error).message;
+      break;
     }
+    await observeTransfer(ctx, allocationId, await s.transfers.retrieve(step.transferId));
   }
-  if (uncoveredCents > 0) await ctx.runMutation(internal.settlement.reversalShort, { allocationId, amountCents: uncoveredCents, reason: "No transfer left to reverse" });
+  await syncBalance(ctx, claim.destination).catch((e) => console.warn(`Balance check after reversal: ${e}`));
+  if (short) {
+    await ctx.runMutation(internal.settlement.reversalShort, { allocationId, reason: short });
+    return;
+  }
+  if (uncoveredCents > 0) await ctx.runMutation(internal.settlement.reversalUncovered, { allocationId, amountCents: uncoveredCents });
   await ctx.runMutation(internal.settlement.finishReversal, { allocationId });
 }
 
@@ -496,7 +582,11 @@ export const runDue = internalAction({
       if (claim.action === "skip") continue;
       try {
         if (claim.action === "transfer") await runTransfer(ctx, allocationId, claim);
-        else await runReversal(ctx, allocationId, claim.plan, claim.uncoveredCents);
+        else if (claim.action === "reverse") await runReversal(ctx, allocationId, claim);
+        else {
+          await refreshAllocation(ctx, allocationId, claim.transferGroup);
+          await ctx.runMutation(internal.settlement.finishRecheck, { allocationId });
+        }
       } catch (e) {
         await ctx.runMutation(internal.settlement.releaseClaim, { allocationId, error: e instanceof Error ? e.message : String(e) });
       }
@@ -517,9 +607,11 @@ export const refundTip = internalAction({
     if (!Number.isInteger(amount) || amount <= 0) throw new Error("Nothing to refund");
     const refund = await stripe().refunds.create(
       { payment_intent: tip.stripePaymentIntentId, amount, reason: "requested_by_customer", metadata: { tipPaymentId: tip._id } },
-      { idempotencyKey: `refund:${tip._id}:${tip.refundedCents}:${amount}` },
+      // The count of refunds tells a new try apart from a retry, after an earlier refund failed.
+      { idempotencyKey: `refund:${tip._id}:${tip.refunds.length}:${tip.refundedCents}:${amount}` },
     );
-    await syncPayment(ctx, { tipPaymentId: tip._id });
+    // The refund has happened. If this read loses out, the webhook and the hourly recheck carry on.
+    await syncPayment(ctx, { tipPaymentId: tip._id }).catch((e) => console.warn(e));
     return { refundId: refund.id, status: refund.status };
   },
 });
@@ -543,6 +635,9 @@ export const reconcile = internalAction({
       try {
         await syncAccount(ctx, stripeAccountId);
         await syncBalance(ctx, stripeAccountId);
+        // Catches a freeze whose Stripe call never landed, and anyone changing it in the Dashboard.
+        const payee = await ctx.runQuery(internal.payments.payeeByStripeId, { stripeAccountId });
+        if (payee) await applyPayoutSchedule(ctx, payee._id);
       } catch (e) {
         await ctx.runMutation(internal.payments.alert, { kind: "sync_failed", severity: "warning", message: `Couldn't sync ${stripeAccountId}: ${e instanceof Error ? e.message : e}`, ref: stripeAccountId });
       }
@@ -550,42 +645,162 @@ export const reconcile = internalAction({
   },
 });
 
-// Daily: our books against Stripe's balance, and every recent charge against our records.
+const SCAN_PAGES_PER_RUN = 20;
+const OPEN_TXNS_PER_RUN = 25;
+
+const idOf = (value: unknown) => (typeof value === "string" ? value : (value as { id?: string } | null | undefined)?.id);
+
+function txnRow(t: Stripe.BalanceTransaction) {
+  return {
+    txnId: t.id,
+    created: t.created,
+    type: t.type,
+    reportingCategory: t.reporting_category ?? undefined,
+    amountCents: t.amount,
+    feeCents: t.fee,
+    netCents: t.net,
+    currency: t.currency,
+    sourceId: idOf(t.source),
+    livemode: isLive(requireStripeConfig().mode),
+  };
+}
+
+function txnFacts(t: Stripe.BalanceTransaction) {
+  const source = (typeof t.source === "object" ? t.source : null) as null | { id: string; object?: string; [k: string]: any };
+  const fields = source?.object === "charge"
+    ? { paymentIntentId: idOf(source.payment_intent), metadataTipPaymentId: source.metadata?.tipPaymentId }
+    : source?.object === "refund" || source?.object === "dispute"
+      ? { chargeId: idOf(source.charge), paymentIntentId: idOf(source.payment_intent), metadataTipPaymentId: source.metadata?.tipPaymentId }
+      : source?.object === "transfer"
+        ? { allocationId: source.metadata?.allocationId, destination: idOf(source.destination), transferAmountCents: source.amount, transferReversedCents: source.amount_reversed }
+        : source?.object === "topup"
+          ? { sourceStatus: source.status }
+          : {};
+  return { sourceId: idOf(t.source), ...fields };
+}
+
+// Fetches whatever a transaction shows we're missing. Stripe is where the facts come from; the
+// transaction only says which object to read. A webhook that never arrived gets repaired here.
+async function repairFromTxn(ctx: ActionCtx, t: Stripe.BalanceTransaction, txnClass: string) {
+  const source = (typeof t.source === "object" ? t.source : null) as null | { id: string; [k: string]: any };
+  if (!source) return;
+  switch (txnClass) {
+    case "charge":
+    case "refund":
+    case "refund_failure":
+    case "dispute": {
+      const paymentIntentId = idOf(source.payment_intent);
+      let tipPaymentId: string | undefined = source.metadata?.tipPaymentId;
+      if (!tipPaymentId && paymentIntentId) tipPaymentId = (await stripe().paymentIntents.retrieve(paymentIntentId)).metadata?.tipPaymentId;
+      if (tipPaymentId) await syncPayment(ctx, { tipPaymentId });
+      else if (paymentIntentId) await syncPayment(ctx, { paymentIntentId });
+      return;
+    }
+    case "transfer":
+    case "transfer_reversal":
+    case "transfer_failure": {
+      const allocationId = source.metadata?.allocationId;
+      if (allocationId) await observeTransfer(ctx, allocationId, source as unknown as Stripe.Transfer);
+      return;
+    }
+    case "owner_payout":
+      await recordOwnerPayout(ctx, source as unknown as Stripe.Payout);
+      return;
+    case "owner_topup":
+      await ctx.runMutation(internal.payments.recordPlatformMovement, { kind: "topup", stripeObjectId: source.id, amountCents: source.amount, status: source.status, livemode: source.livemode });
+      return;
+  }
+}
+
+async function explainTxn(ctx: ActionCtx, t: Stripe.BalanceTransaction) {
+  const row = txnRow(t);
+  const first = await ctx.runMutation(internal.reconciliation.matchTxn, { row, facts: txnFacts(t) });
+  // Owner movements are booked by reading them, so they always go through the repair step.
+  if (first.state === "matched" && first.txnClass !== "owner_payout" && first.txnClass !== "owner_topup") return;
+  if (first.state === "acknowledged") return;
+  try {
+    await repairFromTxn(ctx, t, first.txnClass);
+  } catch (e) {
+    // Couldn't look. It stays open and blocks withdrawals, and the next run tries again.
+    console.warn(`Couldn't repair from ${t.id}: ${e}`);
+    return;
+  }
+  const second = await ctx.runMutation(internal.reconciliation.matchTxn, { row, facts: txnFacts(t) });
+  if (second.state !== "open") return;
+  const { destination } = txnFacts(t) as { destination?: string };
+  const unknownOutflow = second.txnClass === "transfer" && t.amount < 0 && second.noAllocation === true;
+  await ctx.runMutation(internal.reconciliation.flagTxn, { txnId: t.id, destination, unknownOutflow });
+}
+
+// Reads every balance transaction since the last run, newest first, in pages. Its position is saved, so
+// a run that's cut off carries on where it stopped. Returns whether it got to the end.
+async function scanBalanceTxns(ctx: ActionCtx): Promise<boolean> {
+  const s = stripe();
+  const { fromCreated, startingAfter: saved } = await ctx.runMutation(internal.reconciliation.startScan, {});
+  let startingAfter = saved;
+  for (let i = 0; i < SCAN_PAGES_PER_RUN; i++) {
+    const page = await s.balanceTransactions.list({ created: { gte: fromCreated }, limit: 100, starting_after: startingAfter, expand: ["data.source"] });
+    const closed = new Set(await ctx.runQuery(internal.reconciliation.seenTxns, { txnIds: page.data.map((t) => t.id) }));
+    for (const t of page.data) if (!closed.has(t.id)) await explainTxn(ctx, t);
+    startingAfter = page.data[page.data.length - 1]?.id ?? startingAfter;
+    await ctx.runMutation(internal.reconciliation.savePage, { startingAfter: page.has_more ? startingAfter : undefined, newestCreated: page.data[0]?.created });
+    if (!page.has_more) {
+      await ctx.runMutation(internal.reconciliation.finishScan, { nowSeconds: Math.floor(Date.now() / 1000) });
+      return true;
+    }
+  }
+  return false;
+}
+
+// Our books against Stripe: every balance movement explained, then the totals compared.
 export const reconcileBooks = internalAction({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<{ problems: string[]; safeToWithdrawCents: number; blockers: string[] }> => {
     const { mode } = requireStripeConfig();
     const s = stripe();
+    const complete = await scanBalanceTxns(ctx);
+    if (!complete) await ctx.scheduler.runAfter(0, internal.paymentsNode.reconcileBooks, {});
+    // Older unexplained rows get another look, in case what they were waiting for has turned up.
+    for (const txnId of await ctx.runQuery(internal.reconciliation.openTxns, { limit: OPEN_TXNS_PER_RUN })) {
+      await explainTxn(ctx, await s.balanceTransactions.retrieve(txnId, { expand: ["source"] }));
+    }
     const balance = await s.balance.retrieve();
     const availableCents = usdCents(balance.available);
     const pendingCents = usdCents(balance.pending);
+    const connectReservedCents = usdCents(balance.connect_reserved);
     const { rows, reserveCents } = await ctx.runQuery(internal.ops.ledgerRows, {});
     const totals = ledgerTotals(rows);
     const problems: string[] = [];
-    if (availableCents + pendingCents < totals.workerLiabilityCents) {
-      problems.push(`Stripe holds ${availableCents + pendingCents}, but workers are owed ${totals.workerLiabilityCents}.`);
+    const totalCents = availableCents + pendingCents;
+    const opening: { openingCents: number; scannedNetCents: number } | null = complete ? await ctx.runMutation(internal.reconciliation.openingBalance, { totalCents }) : null;
+    const openingCents: number = opening?.openingCents ?? 0;
+    // Stripe's own list has to add up to its balance, or the scan has missed something.
+    if (opening && opening.openingCents + opening.scannedNetCents !== totalCents) {
+      problems.push(`Stripe's balance is ${totalCents}, but its transactions add up to ${opening.openingCents + opening.scannedNetCents}.`);
     }
-    // Stripe also debits things we don't book per tip, like monthly Connect fees, so a difference is worth a look but isn't alarming alone.
-    const differenceCents = availableCents + pendingCents - totals.expectedStripeBalanceCents;
-    const since = Math.floor(Date.now() / 1000) - 2 * 24 * 60 * 60;
-    const intents = await s.paymentIntents.list({ created: { gte: since }, limit: 100 });
-    const paid = intents.data.filter((p) => p.status === "succeeded");
-    const known = new Set(await ctx.runQuery(internal.payments.knownIntents, { paymentIntentIds: paid.map((p) => p.id) }));
-    for (const p of paid) {
-      if (!known.has(p.id)) problems.push(`PaymentIntent ${p.id} succeeded on Stripe with no record here.`);
+    // Every movement is booked now, fees included, so whatever's left over is a real discrepancy.
+    const differenceCents = complete ? totalCents - openingCents - totals.expectedStripeBalanceCents : 0;
+    let platformPayoutInterval: string | undefined;
+    try {
+      platformPayoutInterval = (await s.balanceSettings.retrieve()).payments?.payouts?.schedule?.interval ?? undefined;
+    } catch (e) {
+      console.warn(`Couldn't read the platform's payout schedule: ${e}`);
     }
-    await ctx.runMutation(internal.ops.saveReconciliation, {
+    const saved: { problems: string[]; safeToWithdrawCents: number; blockers: string[] } = await ctx.runMutation(internal.ops.saveReconciliation, {
       livemode: isLive(mode),
       availableCents,
       pendingCents,
+      connectReservedCents,
       expectedStripeBalanceCents: totals.expectedStripeBalanceCents,
+      openingBalanceCents: openingCents,
       workerLiabilityCents: totals.workerLiabilityCents,
       platformRevenueCents: totals.platformRevenueCents,
-      safeToWithdrawCents: safeToWithdraw({ availableCents, workerLiabilityCents: totals.workerLiabilityCents, reserveCents }),
       differenceCents,
+      platformPayoutInterval,
+      scanComplete: complete,
       problems,
     });
-    return { problems };
+    return { problems: saved.problems, safeToWithdrawCents: saved.safeToWithdrawCents, blockers: saved.blockers };
   },
 });
 

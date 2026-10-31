@@ -102,7 +102,8 @@ export const real = query({
       nextTransferAt: allocations.filter((a) => a.state === "due" && allocationDue(a) > 0).map((a) => a.eligibleAt).sort((a, b) => a - b)[0] ?? null,
       crewPoolCents,
       owedCents: payee?.owedCents ?? 0,
-      payoutsPaused: payee?.payoutsPaused ?? false,
+      // Asked for counts here, even before Stripe confirms: don't promise a frozen worker a Monday payout.
+      payoutsPaused: payee ? payee.payoutsPaused || payee.payoutScheduleDesired === "manual" : false,
       payoutsStatus: payee?.payoutsStatus ?? null,
       week: days,
       payouts: payouts.map((p) => ({ id: p.stripePayoutId, amountCents: p.amountCents, status: p.status, arrivalDate: p.arrivalDate, failureMessage: p.failureMessage })),

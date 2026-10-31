@@ -25,6 +25,7 @@ import type * as ops from "../ops.js";
 import type * as payments from "../payments.js";
 import type * as paymentsCron from "../paymentsCron.js";
 import type * as paymentsNode from "../paymentsNode.js";
+import type * as reconciliation from "../reconciliation.js";
 import type * as settlement from "../settlement.js";
 import type * as tips from "../tips.js";
 import type * as workers from "../workers.js";
@@ -53,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   payments: typeof payments;
   paymentsCron: typeof paymentsCron;
   paymentsNode: typeof paymentsNode;
+  reconciliation: typeof reconciliation;
   settlement: typeof settlement;
   tips: typeof tips;
   workers: typeof workers;

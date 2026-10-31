@@ -2,7 +2,7 @@
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { adjustmentPostings, allocationDue, allocationTargets, canReceive, entitlement, splitTipAmongMembers } from "./paymentRules";
+import { adjustmentPostings, allocationDue, allocationTargets, canReceive, entitlement, obligationTotal, safeToWithdraw, SAFE_FIGURE_TTL_MS, splitTipAmongMembers, type LedgerRow, ledgerTotals, type Obligations } from "./paymentRules";
 import { configuredMode, isLive, supportEmail } from "./stripeEnv";
 
 export async function getControls(ctx: QueryCtx): Promise<Doc<"paymentControls"> | null> {
@@ -45,16 +45,29 @@ export async function raiseAlert(
   a: { kind: string; severity: "critical" | "warning"; message: string; ref?: string; dedupeKey?: string },
 ) {
   const dedupeKey = a.dedupeKey ?? `${a.kind}:${a.ref ?? a.message}`;
-  const existing = await ctx.db.query("opsAlerts").withIndex("by_dedupe", (q) => q.eq("dedupeKey", dedupeKey)).first();
+  // The newest row, so an alert that was resolved long ago doesn't let this one repeat on every run.
+  const existing = await ctx.db.query("opsAlerts").withIndex("by_dedupe", (q) => q.eq("dedupeKey", dedupeKey)).order("desc").first();
   if (existing && existing.resolvedAt === undefined) return;
   await ctx.db.insert("opsAlerts", { ...a, dedupeKey, at: Date.now() });
   await ctx.scheduler.runAfter(0, internal.paymentsNode.sendAlert, { kind: a.kind, severity: a.severity, message: a.message });
 }
 
-// Stops money going to this worker and tells Stripe to stop their payouts.
+// The problem went away by itself, like a retry that worked.
+export async function resolveAlertByKey(ctx: MutationCtx, dedupeKey: string) {
+  const rows = await ctx.db.query("opsAlerts").withIndex("by_dedupe", (q) => q.eq("dedupeKey", dedupeKey)).order("desc").take(5);
+  for (const row of rows) if (row.resolvedAt === undefined) await ctx.db.patch(row._id, { resolvedAt: Date.now() });
+}
+
+// What we want Stripe's payout schedule to be. `payoutsPaused` stays as it is until Stripe confirms.
+export async function requestPayoutSchedule(ctx: MutationCtx, payee: Doc<"payeeAccounts">, desired: "weekly" | "manual") {
+  await ctx.db.patch(payee._id, { payoutScheduleDesired: desired, payoutScheduleGeneration: payee.payoutScheduleGeneration + 1, payoutScheduleAttempts: 0 });
+  await ctx.scheduler.runAfter(0, internal.paymentsNode.enforcePayoutSchedule, { payeeAccountId: payee._id });
+}
+
+// Stops transfers to this worker now, and starts telling Stripe to stop their payouts.
 export async function freezePayee(ctx: MutationCtx, payee: Doc<"payeeAccounts">, reason: string) {
-  await ctx.db.patch(payee._id, { frozenReason: reason, payoutsPaused: true });
-  await ctx.scheduler.runAfter(0, internal.paymentsNode.setPayoutsPaused, { payeeAccountId: payee._id, paused: true });
+  await ctx.db.patch(payee._id, { frozenReason: reason });
+  await requestPayoutSchedule(ctx, payee, "manual");
 }
 
 type Post = { ref: string; debit: string; credit: string; amountCents: number; livemode: boolean; tipPaymentId?: Id<"tipPayments">; allocationId?: Id<"allocations">; workerId?: Id<"workers">; stripeObjectId?: string };
@@ -95,6 +108,7 @@ async function insertAllocation(
     attempts: 0,
     transfers: [],
   });
+  await ctx.db.patch(tip._id, { allocated: true });
 }
 
 // A tip that isn't going to a crew: all of it is the receiving worker's.
@@ -115,10 +129,11 @@ export async function rebalanceTip(ctx: MutationCtx, tipPaymentId: Id<"tipPaymen
   const netDelta = e.netTakenCents - tip.postedNetTakenCents;
   const feeDelta = e.feesTakenCents - tip.postedFeesTakenCents;
   if (netDelta !== 0 || feeDelta !== 0) {
-    const stamp = `${tip.refundedCents}:${tip.disputedCents}`;
+    // Amounts can repeat (a refund fails and is issued again), so the ref can't be built from them.
+    const seq = tip.ledgerSeq + 1;
     for (const row of adjustmentPostings(netDelta, feeDelta)) {
       await post(ctx, {
-        ref: `tip:${tip._id}:adjust:${stamp}:${row.debit}:${row.credit}`,
+        ref: `tip:${tip._id}:adjust:${seq}:${row.debit}:${row.credit}`,
         debit: row.debit,
         credit: row.credit,
         amountCents: row.amountCents,
@@ -127,7 +142,7 @@ export async function rebalanceTip(ctx: MutationCtx, tipPaymentId: Id<"tipPaymen
         workerId: tip.workerId,
       });
     }
-    await ctx.db.patch(tip._id, { postedNetTakenCents: e.netTakenCents, postedFeesTakenCents: e.feesTakenCents });
+    await ctx.db.patch(tip._id, { postedNetTakenCents: e.netTakenCents, postedFeesTakenCents: e.feesTakenCents, ledgerSeq: seq });
   }
   const allocations = await ctx.db.query("allocations").withIndex("by_tip", (q) => q.eq("tipPaymentId", tip._id)).collect();
   if (allocations.length === 0) return;
@@ -155,8 +170,9 @@ async function setTarget(ctx: MutationCtx, a: Doc<"allocations">, targetCents: n
     targetCents,
     paidCents,
     unrecoveredCents,
-    // A Stripe call in progress finishes first; completing it re-evaluates the state.
-    ...(a.state === "in_flight" ? {} : { state: after === 0 ? ("settled" as const) : ("due" as const) }),
+    // A Stripe call in progress finishes first; completing it re-evaluates the state. After a failed
+    // attempt it stays due even at zero: that attempt may have reached Stripe, and the next claim looks.
+    ...(a.state === "in_flight" ? {} : { state: after === 0 && a.attempts === 0 ? ("settled" as const) : ("due" as const) }),
   });
 }
 
@@ -191,6 +207,53 @@ export async function allocateCrewPool(
     }
   }
   return totals;
+}
+
+const OBLIGATION_READ_LIMIT = 2000;
+
+// Everything that has to stay in the platform's balance, added up without any netting.
+export async function currentObligations(ctx: QueryCtx, connectReservedCents: number, rows: LedgerRow[], reserveCents: number) {
+  const due = await ctx.db.query("allocations").withIndex("by_state_eligible", (q) => q.eq("state", "due")).take(OBLIGATION_READ_LIMIT);
+  const inFlight = await ctx.db.query("allocations").withIndex("by_state_eligible", (q) => q.eq("state", "in_flight")).take(OBLIGATION_READ_LIMIT);
+  const unallocated = await ctx.db.query("tipPayments").withIndex("by_allocated_status", (q) => q.eq("allocated", false).eq("status", "succeeded")).take(OBLIGATION_READ_LIMIT);
+  const held = await ctx.db.query("tipPayments").withIndex("by_guest_hold", (q) => q.eq("hasGuestHold", true)).take(OBLIGATION_READ_LIMIT);
+  const payees = await ctx.db.query("payeeAccounts").take(OBLIGATION_READ_LIMIT);
+  const negative = payees.reduce((a, p) => a + Math.max(0, -(p.balanceAvailableCents ?? 0)), 0);
+  const obligations: Obligations = {
+    workerDueCents: [...due, ...inFlight].reduce((a, x) => a + Math.max(0, allocationDue(x)), 0),
+    unallocatedTipCents: unallocated.reduce((a, t) => a + entitlement(t).entitledCents, 0),
+    reviewHeldCents: ledgerTotals(rows).reviewHeldCents,
+    guestHoldCents: held.reduce((a, t) => a + t.guestHoldCents, 0),
+    // A negative worker balance takes a while to show up as Stripe's reserve against us.
+    negativeWorkerCents: Math.max(0, negative - connectReservedCents),
+    reserveCents,
+  };
+  const truncated = [due, inFlight, unallocated, held, payees].some((r) => r.length === OBLIGATION_READ_LIMIT);
+  return { obligations, truncated };
+}
+
+// Reasons the safe figure can't be trusted right now.
+export async function withdrawalBlockers(ctx: QueryCtx, last: Pick<Doc<"reconciliations">, "at" | "problems" | "differenceCents" | "platformPayoutInterval"> | null, truncated: boolean): Promise<string[]> {
+  if (!last) return ["No reconciliation has run yet."];
+  const blockers: string[] = [];
+  if (Date.now() - last.at > SAFE_FIGURE_TTL_MS) blockers.push("The Stripe balance on file is more than two hours old. Run paymentsNode:reconcileBooks.");
+  if (truncated) blockers.push("Too many open records to add up in one read.");
+  if (last.platformPayoutInterval !== "manual") blockers.push(`The platform's own payouts are ${last.platformPayoutInterval ?? "unverified"}, not manual, so Stripe could sweep worker money.`);
+  if (last.differenceCents !== 0) blockers.push(`The books and Stripe differ by ${last.differenceCents} cents.`);
+  if (last.problems.length > 0) blockers.push("The last reconciliation found problems.");
+  const scan = await ctx.db.query("balanceScan").withIndex("by_key", (q) => q.eq("key", "platform")).unique();
+  if (!scan?.completedAt || scan.startingAfter) blockers.push("The scan of Stripe's balance transactions hasn't finished.");
+  const open = await ctx.db.query("balanceTxns").withIndex("by_state", (q) => q.eq("state", "open")).take(1);
+  if (open.length > 0) blockers.push("A Stripe transaction hasn't been explained. See ops:status.");
+  return blockers;
+}
+
+// The figures an owner decides a withdrawal on.
+export async function withdrawalPosition(ctx: QueryCtx, last: Doc<"reconciliations"> | null, rows: LedgerRow[], reserveCents: number) {
+  const { obligations, truncated } = await currentObligations(ctx, last?.connectReservedCents ?? 0, rows, reserveCents);
+  const blockers = await withdrawalBlockers(ctx, last, truncated);
+  const safeToWithdrawCents = safeToWithdraw({ availableCents: last?.availableCents ?? 0, obligations, blockers });
+  return { obligations, obligationsCents: obligationTotal(obligations), blockers, safeToWithdrawCents };
 }
 
 // What keeps someone from deleting: anything where money could still move, or be owed.

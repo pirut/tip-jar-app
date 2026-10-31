@@ -2,11 +2,12 @@
 //
 //   npm run test:sandbox     (needs `stripe login` on a sandbox, and Playwright; see PLAYWRIGHT_PATH)
 //
-// What's real: Stripe's API, Checkout pages, test cards, charges, transfers, reversals, refunds,
-// disputes, signed webhooks. What's not: Convex (the database is the in-memory test one) and Express
+// What's real: Stripe's API, Checkout pages, test cards, charges, transfers, reversals, refunds
+// (including ones that fail later), disputes, balance transactions, payout schedules, signed webhooks. What's not: Convex (the database is the in-memory test one) and Express
 // onboarding (Stripe needs a person for that, so test workers use prefilled accounts).
 //
-// It refuses to run against anything but test mode. No live money can move.
+// It refuses to run against anything but test mode. No live money can move. Nothing else should use the
+// sandbox during a run, or for the minute before: reconciliation is right to call that unexplained.
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -44,7 +45,7 @@ function cli(method: "get" | "post", path: string, params: any = {}, options: an
   flatten("", params, data);
   const args = [method, path, "-v", options.apiVersion ?? API_VERSION, ...data.flatMap((d) => ["-d", d])];
   if (options.stripeAccount) args.push("--stripe-account", options.stripeAccount);
-  // In-memory ids repeat from run to run, and Stripe would replay the earlier run's answer.
+  // Keys are only unique if the run is in them, and Stripe would replay an earlier run's answer.
   if (options.idempotencyKey) args.push("-i", `${RUN}:${options.idempotencyKey}`);
   if (method === "post") args.push("-c");
   const r = spawnSync("stripe", args, { encoding: "utf8", maxBuffer: 50_000_000 });
@@ -64,8 +65,15 @@ const client = {
     createLoginLink: async (id: string) => cli("post", `/v1/accounts/${id}/login_links`),
   },
   accountLinks: { create: async (p: any) => cli("post", "/v1/account_links", p) },
-  balanceSettings: { update: async (p: any, o: any) => cli("post", "/v1/balance_settings", p, o) },
+  balanceSettings: {
+    retrieve: async (_p: any = {}, o: any = {}) => cli("get", "/v1/balance_settings", {}, o),
+    update: async (p: any, o: any) => cli("post", "/v1/balance_settings", p, o),
+  },
   balance: { retrieve: async (_p: any = {}, o: any = {}) => cli("get", "/v1/balance", {}, o) },
+  balanceTransactions: {
+    list: async (p: any) => cli("get", "/v1/balance_transactions", p),
+    retrieve: async (id: string, p: any = {}) => cli("get", `/v1/balance_transactions/${id}`, p),
+  },
   checkout: {
     sessions: {
       create: async (p: any, o: any) => cli("post", "/v1/checkout/sessions", p, o),
@@ -77,7 +85,10 @@ const client = {
     list: async (p: any) => cli("get", "/v1/payment_intents", p),
   },
   disputes: { list: async (p: any) => cli("get", "/v1/disputes", p) },
-  refunds: { create: async (p: any, o: any) => cli("post", "/v1/refunds", p, o) },
+  refunds: {
+    create: async (p: any, o: any) => cli("post", "/v1/refunds", p, o),
+    list: async (p: any) => cli("get", "/v1/refunds", p),
+  },
   transfers: {
     create: async (p: any, o: any) => cli("post", "/v1/transfers", p, o),
     list: async (p: any) => cli("get", "/v1/transfers", p),
@@ -112,7 +123,7 @@ const check = (cond: unknown, what: string) => {
     throw new Error(`FAILED: ${what}`);
   }
 };
-const dump = () => Object.fromEntries(["tipPayments", "allocations", "stripeEvents", "opsAlerts"].map((t) => [t, w.rows(t)]));
+const dump = () => Object.fromEntries(["tipPayments", "allocations", "stripeEvents", "opsAlerts", "balanceTxns"].map((t) => [t, w.rows(t)]));
 
 // Webhooks, signed by Stripe, through the same entry points http.ts uses.
 const events = { received: 0, rejected: 0 };
@@ -247,6 +258,9 @@ const settle = async () => {
 
 const INSTANT_FUNDS = "4000000000000077"; // Funds are available at once, like a settled charge.
 const DISPUTED = "4000000000000259"; // Pays, then a dispute opens.
+const NORMAL = "4242424242424242"; // Funds stay pending for days, like most real cards.
+const REFUND_FAILS = "4000000000005126"; // The refund looks fine, then fails a few minutes later.
+const REFUND_PENDING = "4000000000007726"; // The refund sits pending.
 
 const usd = (rows: any[]) => rows.filter((r) => r.currency === "usd").reduce((a, r) => a + r.amount, 0);
 const platformBalance = () => {
@@ -368,10 +382,93 @@ try {
   check(repaid.amount === 700 && repaid.destination === benAcct, "won dispute pays the worker");
   step("Dispute won: worker is paid", { amount: repaid.amount });
 
-  // Books against Stripe.
+  // A normal card: the money is still pending on the worker's side when the refund comes.
+  const normal = await tipByCheckout("ann-e2e", 500, NORMAL);
+  await settle();
+  const normalAlloc = allocs(normal)[0];
+  check(normalAlloc.state === "settled", "normal-card tip transferred");
+  const annBefore = cli("get", "/v1/balance", {}, { stripeAccount: annAcct });
+  await w.act(paymentsNode.refundTip, null, { tipPaymentId: normal });
+  await settle();
+  const normalAfter = allocs(normal)[0];
+  check(normalAfter.state === "settled" && normalAfter.paidCents === 0, `reversal while pending settled (${normalAfter.state}, ${normalAfter.paidCents})`);
+  check(transferOf(normalAfter.transfers[0].id).amount_reversed === 500, "Stripe reversed the pending transfer");
+  check(!w.rows("payeeAccounts").find((p) => p.stripeAccountId === annAcct).frozenReason, "a reversal from pending funds doesn't freeze anyone");
+  const annAfter = cli("get", "/v1/balance", {}, { stripeAccount: annAcct });
+  step("Normal card: a refund right after the transfer reverses from pending funds", { pendingBefore: usd(annBefore.pending), pendingAfter: usd(annAfter.pending), availableAfter: usd(annAfter.available) });
+
+  // Instant funds already paid out to the bank: the worker has nothing left when the refund comes.
+  const camAcct = await pilotWorker("cam", "cam-e2e");
+  const emptied = await tipByCheckout("cam-e2e", 800, INSTANT_FUNDS);
+  await settle();
+  check(allocs(emptied)[0].state === "settled", "tip transferred to cam");
+  const payout = cli("post", "/v1/payouts", { amount: 800, currency: "usd" }, { stripeAccount: camAcct });
+  check(!payout.error, `worker payout to the bank (${payout.error?.message})`);
+  await until("cam's balance empties", () => usd(cli("get", "/v1/balance", {}, { stripeAccount: camAcct }).available) === 0);
+  await w.act(paymentsNode.refundTip, null, { tipPaymentId: emptied });
+  await settle();
+  await w.runDueJobs();
+  const emptiedAfter = allocs(emptied)[0];
+  const cam = () => w.rows("payeeAccounts").find((p) => p.stripeAccountId === camAcct);
+  check(emptiedAfter.paidCents === 0 && transferOf(emptiedAfter.transfers[0].id).amount_reversed === 800, "Stripe took the reversal anyway");
+  check(cam().owedCents === 0, "no made-up debt: Stripe's own negative balance holds it");
+  check(cam().balanceAvailableCents === -800, `worker's balance is negative on Stripe (${cam().balanceAvailableCents})`);
+  check(cam().frozenReason, "a negative balance freezes the worker");
+  check(cam().payoutsPaused === true, "Stripe confirmed manual payouts");
+  check(cli("get", "/v1/balance_settings", {}, { stripeAccount: camAcct }).payments?.payouts?.schedule?.interval === "manual", "Stripe's own record says manual");
+  step("Zero balance: the reversal goes negative, and the worker is frozen with payouts paused", { workerAvailable: cam().balanceAvailableCents });
+
+  // A refund that fails minutes later, after it looked done and the money had come back from the worker.
+  const danAcct = await pilotWorker("dan", "dan-e2e");
+  const failing = await tipByCheckout("dan-e2e", 600, REFUND_FAILS);
+  await settle();
+  const { refundId } = await w.act(paymentsNode.refundTip, null, { tipPaymentId: failing });
+  await settle();
+  check(allocs(failing)[0].targetCents === 0 && allocs(failing)[0].paidCents === 0, "looks refunded at first");
+  await until("refund.failed reaches us", () => tip(failing).refundedCents === 0, 360_000);
+  check(tip(failing).refunds[0].status === "failed", "the failure is on file");
+  check(w.rows("opsAlerts").some((a) => a.kind === "refund_failed" && a.severity === "critical"), "someone gets told");
+  check(allocs(failing)[0].targetCents === 600, "the tip counts again");
+  const transfersBefore = allocs(failing)[0].transfers.length;
+  await w.db.patch(allocs(failing)[0]._id, { eligibleAt: Date.now() });
+  await settle();
+  check(allocs(failing)[0].transfers.length === transfersBefore, "but nothing goes back to the worker until a person decides");
+  check(/refund failed/.test(allocs(failing)[0].lastError ?? ""), "and it says why");
+  step("Refund fails later: refund.failed reverses the books and holds the worker's money", { refund: refundId, tipRefundedAfter: tip(failing).refundedCents });
+  await w.call(ops.resolveFailedRefund, null, { tipPaymentId: failing, note: "sandbox: resolved by test" });
+  await w.db.patch(allocs(failing)[0]._id, { eligibleAt: Date.now() });
+  await settle();
+  check(allocs(failing)[0].paidCents === 600, `paid again once resolved (${allocs(failing)[0].paidCents})`);
+  step("Failed refund resolved: the worker is paid", { worker: danAcct });
+
+  // A refund that sits pending: the guest's money isn't anyone else's meanwhile.
+  const slow = await tipByCheckout("dan-e2e", 400, REFUND_PENDING);
+  await settle();
+  const slowRefund = await w.act(paymentsNode.refundTip, null, { tipPaymentId: slow, amountCents: 200 });
+  const slowHold = tip(slow).guestHoldCents;
+  step("Pending refund is held for the guest", { refundStatus: slowRefund.status, guestHoldCents: slowHold });
+  await settle();
+
+  // Freeze and unfreeze against Stripe's real schedule.
+  await w.call(ops.freezeWorker, null, { handle: "dan-e2e", reason: "sandbox" });
+  await w.runDueJobs();
+  check(cli("get", "/v1/balance_settings", {}, { stripeAccount: danAcct }).payments?.payouts?.schedule?.interval === "manual", "freeze reaches Stripe");
+  check(w.rows("payeeAccounts").find((p) => p.stripeAccountId === danAcct).payoutsPaused === true, "and is recorded only then");
+  await w.call(ops.unfreezeWorker, null, { handle: "dan-e2e" });
+  await w.runDueJobs();
+  check(cli("get", "/v1/balance_settings", {}, { stripeAccount: danAcct }).payments?.payouts?.schedule?.interval === "weekly", "unfreeze reaches Stripe");
+  step("Freeze and unfreeze change Stripe's real payout schedule");
+
+  // Books against Stripe, itemized from Stripe's real balance transactions. Stripe's reserve for the
+  // negative balance above arrives a little after the reversal, so this waits for it.
   await new Promise((r) => setTimeout(r, 3000));
   await w.runDueJobs();
-  await w.act(paymentsNode.reconcileBooks);
+  let lastRecon: any;
+  await until("the balance transactions all reconcile", async () => {
+    await w.act(paymentsNode.reconcileBooks);
+    lastRecon = w.rows("reconciliations").at(-1);
+    return lastRecon.differenceCents === 0 && w.rows("balanceTxns").every((t) => t.state !== "open") && ledgerTotals(w.rows("ledgerEntries")).connectReserveCents >= 800;
+  }, 240_000);
   const b = await w.call(ops.books);
   report.books = b;
   const endBalance = platformBalance();
@@ -379,13 +476,20 @@ try {
   const moved = endBalance.available + endBalance.pending - startBalance.available - startBalance.pending;
   check(moved === b.expectedStripeBalanceCents, `Stripe's balance moved ${moved}, the books expected ${b.expectedStripeBalanceCents}`);
   check(b.workerLiabilityCents === 0, `worker liability should be 0, is ${b.workerLiabilityCents}`);
-  step("Books reconciled against Stripe's platform balance", {
+  report.txnTypes = w.rows("balanceTxns").reduce((a: any, t: any) => ({ ...a, [`${t.type}/${t.reportingCategory}`]: (a[`${t.type}/${t.reportingCategory}`] ?? 0) + 1 }), {});
+  step("Every balance transaction explained, and the books match Stripe", {
+    transactions: w.rows("balanceTxns").length,
     booksExpectedMovement: b.expectedStripeBalanceCents,
     stripeActualMovement: moved,
     platformRevenue: b.platformRevenueCents,
     feesCollected: b.feesCollectedCents,
     stripeFees: b.processingCostCents,
     disputeFees: b.disputeFeesCents,
+    reserveForNegativeBalances: b.connectReserveCents,
+    obligations: b.obligationsCents,
+    safeToWithdraw: b.safeToWithdrawCents,
+    blockers: b.withdrawalBlockers,
+    platformPayouts: b.lastReconciliation.platformPayoutInterval,
   });
   report.events = events;
   report.eventStatuses = w.rows("stripeEvents").reduce((a: any, e: any) => ({ ...a, [e.status]: (a[e.status] ?? 0) + 1 }), {});

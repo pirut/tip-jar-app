@@ -9,7 +9,8 @@
     "deploy:backend": "convex deploy",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
     "typecheck": "tsc -p convex --noEmit && npm run typecheck -w apps/web && npm run typecheck -w apps/mobile",
-    "test:sandbox": "node --experimental-strip-types scripts/sandbox-e2e.ts"
+    "test:sandbox": "node --experimental-strip-types scripts/sandbox-e2e.ts",
+    "test:probes": "node --experimental-strip-types scripts/sandbox-probes.ts"
   },
   "dependencies": {
     "convex": "^1.49.0",

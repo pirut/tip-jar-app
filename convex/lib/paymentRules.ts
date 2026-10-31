@@ -35,7 +35,8 @@ export type DisputeSnapshot = { id: string; status: string; amountCents: number;
 
 const NO_MONEY_TAKEN = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "won", "prevented"]);
 const INQUIRY_OPEN = new Set(["warning_needs_response", "warning_under_review"]);
-const FORMAL_OPEN = new Set(["needs_response", "under_review"]);
+// An appeal of a lost dispute isn't over: the money stays taken, but it can still come back.
+const FORMAL_OPEN = new Set(["needs_response", "under_review", "appeal_needs_response", "appeal_under_review"]);
 
 // Money Stripe has taken back for disputes. Inquiries take none; won disputes give it back.
 export function disputedCents(disputes: DisputeSnapshot[]): number {
@@ -49,6 +50,36 @@ export function disputeFeeCents(disputes: DisputeSnapshot[]): number {
 // Anything still being argued stops further transfers for this tip.
 export function disputeOpen(disputes: DisputeSnapshot[]): boolean {
   return disputes.some((d) => INQUIRY_OPEN.has(d.status) || FORMAL_OPEN.has(d.status));
+}
+
+// Inquiries Stripe hasn't taken money for yet, but might.
+export function inquiryCents(disputes: DisputeSnapshot[]): number {
+  return disputes.filter((d) => INQUIRY_OPEN.has(d.status)).reduce((a, d) => a + d.amountCents, 0);
+}
+
+export type RefundSnapshot = { id: string; amountCents: number; status: string };
+
+// Stripe's refund statuses. A failed or canceled refund has returned, or will return, to the balance.
+const REFUND_GONE = new Set(["failed", "canceled"]);
+const REFUND_UNFINISHED = new Set(["pending", "requires_action"]);
+
+// What the guest is getting back: anything not known to have failed.
+export function activeRefundCents(refunds: RefundSnapshot[]): number {
+  return refunds.filter((r) => !REFUND_GONE.has(r.status)).reduce((a, r) => a + r.amountCents, 0);
+}
+
+export function failedRefundCents(refunds: RefundSnapshot[]): number {
+  return refunds.filter((r) => REFUND_GONE.has(r.status)).reduce((a, r) => a + r.amountCents, 0);
+}
+
+export function unfinishedRefundCents(refunds: RefundSnapshot[]): number {
+  return refunds.filter((r) => REFUND_UNFINISHED.has(r.status)).reduce((a, r) => a + r.amountCents, 0);
+}
+
+// Money that belongs to guests, or may: refunds still on their way, refunds that failed and nobody
+// has dealt with, and inquiries that could become chargebacks. Never available to the owner.
+export function guestHoldCents(p: { refunds: RefundSnapshot[]; failedRefundAckCents: number; inquiryCents: number }): number {
+  return unfinishedRefundCents(p.refunds) + Math.max(0, failedRefundCents(p.refunds) - p.failedRefundAckCents) + p.inquiryCents;
 }
 
 // What's left for workers once refunds and disputes are counted.
@@ -118,7 +149,6 @@ export function nextPaymentStatus(current: PaymentStatus, piStatus: PiStatus): P
 }
 
 export type PaymentSnapshot = {
-  fetchedFrom: number; // when the fetch started, so an older read can't overwrite a newer one
   paymentIntentId: string;
   piStatus: PiStatus;
   amountCents: number;
@@ -128,7 +158,7 @@ export type PaymentSnapshot = {
   chargeId?: string;
   paidAt?: number;
   stripeFeeCents?: number;
-  refundedCents: number;
+  refunds: RefundSnapshot[];
   cardBrand?: string;
   disputes: DisputeSnapshot[];
 };
@@ -157,26 +187,107 @@ export function adjustmentPostings(netDelta: number, feeDelta: number) {
   return rows;
 }
 
-export type LedgerAccount = "stripe_balance" | "worker_liability" | "platform_fees" | "processing_cost" | "dispute_fees" | "owner_withdrawals" | "owner_capital";
+export type LedgerAccount =
+  | "stripe_balance"
+  | "worker_liability"
+  | "platform_fees"
+  | "processing_cost"
+  | "dispute_fees"
+  | "owner_withdrawals"
+  | "owner_capital"
+  | "stripe_costs" // Connect, tax and other Stripe charges that aren't tied to one tip
+  | "connect_reserve" // what Stripe holds back from the platform for negative worker balances
+  | "review_held" // money Stripe collected on a payment waiting for a person to look at it
+  | "unclassified"; // Stripe activity nobody has explained yet
 
 export type LedgerRow = { debit: LedgerAccount; credit: LedgerAccount; amountCents: number };
 
 // Debit-positive balance per account, then the figures the owner needs.
 export function ledgerTotals(rows: LedgerRow[]) {
-  const balance: Record<LedgerAccount, number> = { stripe_balance: 0, worker_liability: 0, platform_fees: 0, processing_cost: 0, dispute_fees: 0, owner_withdrawals: 0, owner_capital: 0 };
+  const balance: Record<LedgerAccount, number> = { stripe_balance: 0, worker_liability: 0, platform_fees: 0, processing_cost: 0, dispute_fees: 0, owner_withdrawals: 0, owner_capital: 0, stripe_costs: 0, connect_reserve: 0, review_held: 0, unclassified: 0 };
   for (const r of rows) {
     balance[r.debit] += r.amountCents;
     balance[r.credit] -= r.amountCents;
   }
   const workerLiabilityCents = 0 - balance.worker_liability;
   const feesCollectedCents = 0 - balance.platform_fees;
-  const platformRevenueCents = feesCollectedCents - balance.processing_cost - balance.dispute_fees;
-  return { expectedStripeBalanceCents: balance.stripe_balance, workerLiabilityCents, feesCollectedCents, processingCostCents: balance.processing_cost, disputeFeesCents: balance.dispute_fees, platformRevenueCents, ownerWithdrawalsCents: balance.owner_withdrawals, ownerCapitalCents: 0 - balance.owner_capital };
+  const platformRevenueCents = feesCollectedCents - balance.processing_cost - balance.dispute_fees - balance.stripe_costs;
+  return {
+    expectedStripeBalanceCents: balance.stripe_balance,
+    workerLiabilityCents,
+    feesCollectedCents,
+    processingCostCents: balance.processing_cost,
+    disputeFeesCents: balance.dispute_fees,
+    stripeCostsCents: balance.stripe_costs,
+    connectReserveCents: balance.connect_reserve,
+    reviewHeldCents: 0 - balance.review_held,
+    unclassifiedCents: balance.unclassified,
+    platformRevenueCents,
+    ownerWithdrawalsCents: balance.owner_withdrawals,
+    ownerCapitalCents: 0 - balance.owner_capital,
+  };
 }
 
-// What can leave the platform's Stripe balance without touching worker money or the reserve.
-export function safeToWithdraw(p: { availableCents: number; workerLiabilityCents: number; reserveCents: number }): number {
-  return Math.max(0, p.availableCents - Math.max(0, p.workerLiabilityCents) - p.reserveCents);
+// Everything that has to stay in the balance. Each part is gross: what one worker owes never makes
+// room for what another is owed, because a debt isn't cash.
+export type Obligations = {
+  workerDueCents: number; // allocations still to transfer
+  unallocatedTipCents: number; // tips in open crew pools, not split yet
+  reviewHeldCents: number; // collected on a payment under review
+  guestHoldCents: number; // refunds in progress or failed, and open inquiries
+  negativeWorkerCents: number; // negative worker balances Stripe hasn't reserved from us yet
+  reserveCents: number; // the owner's own buffer
+};
+
+export function obligationTotal(o: Obligations): number {
+  return o.workerDueCents + o.unallocatedTipCents + o.reviewHeldCents + o.guestHoldCents + o.negativeWorkerCents + o.reserveCents;
+}
+
+// The most the owner can take without touching any of that. Any blocker makes it zero: when we can't
+// trust the inputs, the answer is "don't", not a number.
+export function safeToWithdraw(p: { availableCents: number; obligations: Obligations; blockers: string[] }): number {
+  if (p.blockers.length > 0) return 0;
+  return Math.max(0, p.availableCents - obligationTotal(p.obligations));
+}
+
+// How long a reconciliation's Stripe balance can be used for a withdrawal decision.
+export const SAFE_FIGURE_TTL_MS = 2 * 60 * 60 * 1000;
+
+export type BalanceTxnClass = "charge" | "refund" | "refund_failure" | "dispute" | "transfer" | "transfer_reversal" | "transfer_failure" | "owner_payout" | "owner_topup" | "stripe_cost" | "connect_reserve" | "unknown";
+
+const TXN_CLASS: Record<string, BalanceTxnClass> = {
+  charge: "charge",
+  payment: "charge",
+  refund: "refund",
+  payment_refund: "refund",
+  refund_failure: "refund_failure",
+  transfer: "transfer",
+  transfer_refund: "transfer_reversal",
+  transfer_cancel: "transfer_failure",
+  transfer_failure: "transfer_failure",
+  payout: "owner_payout",
+  payout_cancel: "owner_payout",
+  payout_failure: "owner_payout",
+  topup: "owner_topup",
+  topup_reversal: "owner_topup",
+  stripe_fee: "stripe_cost",
+  tax_fee: "stripe_cost",
+  stripe_fx_fee: "stripe_cost",
+  reserve_transaction: "connect_reserve",
+  connect_collection_transfer: "connect_reserve",
+};
+
+// What a balance transaction is. Stripe reports disputes and refund failures as `adjustment` with the
+// real meaning in reporting_category, and an adjustment we can't name stays unknown on purpose.
+export function classifyBalanceTxn(t: { type: string; reporting_category?: string | null; currency: string; source?: unknown }): BalanceTxnClass {
+  if (t.currency !== "usd") return "unknown";
+  if (t.type === "adjustment") {
+    const category = t.reporting_category ?? "";
+    if (category === "dispute" || category === "dispute_reversal") return "dispute";
+    if (category === "refund_failure") return "refund_failure";
+    return "unknown";
+  }
+  return TXN_CLASS[t.type] ?? "unknown";
 }
 
 export const CHARGE_WINDOW_MS = 24 * 60 * 60 * 1000;
