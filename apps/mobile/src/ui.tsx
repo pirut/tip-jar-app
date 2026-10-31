@@ -146,7 +146,7 @@ export function Seg<T extends string>({ options, value, onChange, disabled, labe
       {options.map(([k, optionLabel]) => (
         <Pressable key={k} disabled={disabled} onPress={() => onChange(k)} accessibilityRole="radio" accessibilityState={{ checked: value === k, disabled: !!disabled }}
           style={({ pressed }) => ({ flex: 1, minHeight: 44, justifyContent: "center", borderRadius: 9, alignItems: "center", paddingHorizontal: 2, opacity: pressed ? 0.7 : 1, backgroundColor: value === k ? c.segOn : "transparent" })}>
-          <Text maxFontSizeMultiplier={1.4} style={{ fontSize: 13, textAlign: "center", fontFamily: FONT.bodyBold, color: value === k ? c.ink : c.muted }}>{optionLabel}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.4} style={{ fontSize: 13, textAlign: "center", fontFamily: FONT.bodyBold, color: value === k ? c.ink : c.muted }}>{optionLabel}</Text>
         </Pressable>
       ))}
     </View>
