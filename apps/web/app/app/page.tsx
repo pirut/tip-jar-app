@@ -5,6 +5,7 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { api } from "@convex/_generated/api";
 import { LegalLinks, Logo } from "@/components/Brand";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DemoBar } from "@/components/DemoBar";
 import { IconCrew, IconEarnings, IconTips } from "@/components/Icons";
 import { SignIn } from "@/components/SignIn";
@@ -51,6 +52,7 @@ export default function WorkerApp() {
   const { signOut } = useClerk();
   const [tab, setTabState] = useState<Tab>("tips");
   const [deletion, setDeletion] = useState<Deletion>(null);
+  const [confirmSignInDeletion, setConfirmSignInDeletion] = useState(false);
 
   // Tabs live in the URL, so reload and the Back button behave.
   useEffect(() => {
@@ -68,7 +70,8 @@ export default function WorkerApp() {
   async function deleteSignIn() {
     setDeletion("signin");
     try {
-      await user?.delete();
+      if (!user) throw new Error("Sign in again to finish deleting your account.");
+      await user.delete();
       // The session went with the user, so there's nothing left to sign out of.
       window.location.assign("/app");
     } catch {
@@ -96,7 +99,7 @@ export default function WorkerApp() {
         {deletion === "failed" ? (
           <main className="center-body" role="alert">
             <h1 className="t-title">Your account is only partly deleted</h1>
-            <p className="muted">Your Tip Jar profile, tips and cash-outs are gone, but your sign-in account couldn&apos;t be removed. You may need to sign in again first.</p>
+            <p className="muted">Your Tip Jar profile, tips and cash-outs are gone, but your sign-in account couldn&apos;t be removed. Try again below. If you need to sign in again, choose Delete my sign-in account on the setup screen.</p>
             <div className="row wrap">
               <button className="btn primary" onClick={deleteSignIn}>Try again</button>
               <button className="btn" onClick={leave}>Sign out</button>
@@ -126,6 +129,14 @@ export default function WorkerApp() {
         <div className="site-head"><Logo /></div>
         <main className="onboard">
           <ProfileForm onSignOut={leave} />
+          <section className="section-line stack">
+            <h2 className="t-sub">Your sign-in account</h2>
+            <p className="muted">No tip profile is connected to this account. You can delete your sign-in account without creating a profile, including after an earlier deletion was interrupted.</p>
+            <button className="btn" onClick={() => setConfirmSignInDeletion(true)}>Delete my sign-in account</button>
+          </section>
+          <ConfirmDialog open={confirmSignInDeletion} title="Delete your sign-in account?" confirmLabel="Delete sign-in account" cancelLabel="Keep account" danger onCancel={() => setConfirmSignInDeletion(false)} onConfirm={() => { setConfirmSignInDeletion(false); void deleteSignIn(); }}>
+            This removes your sign-in account and email from Clerk. This can&apos;t be undone.
+          </ConfirmDialog>
           <LegalLinks />
         </main>
       </>
@@ -148,11 +159,11 @@ export default function WorkerApp() {
       <DemoBar />
       <div className="shell">
         <header className="appbar">
-          <Logo href="/app" />
+          <Logo href="/app" onNavigate={(e) => { e.preventDefault(); setTab("tips"); }} />
           <div className="row" style={{ gap: 4 }}>{crewStatus}<button className="user-btn" onClick={() => setTab("profile")} aria-label="Edit profile"><span className="avatar sm">{initials(worker.name)}</span></button></div>
         </header>
         <aside className="sidebar">
-          <div className="sidebar-brand"><Logo href="/app" /></div>
+          <div className="sidebar-brand"><Logo href="/app" onNavigate={(e) => { e.preventDefault(); setTab("tips"); }} /></div>
           <nav className="tabs" aria-label="Sections">
             {TABS.map(([k, l, icon]) => (
               <button key={k} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>{icon}{l}</button>

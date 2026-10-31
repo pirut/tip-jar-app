@@ -29,9 +29,10 @@ export function GuestTip({ handle, worker }: { handle: string; worker: Worker })
 
   // A reload after paying shows the receipt again, not an armed Pay button.
   useEffect(() => {
-    const saved = sessionStorage.getItem(receiptKey);
-    if (!saved) return;
-    try { setReceipt(JSON.parse(saved)); } catch { sessionStorage.removeItem(receiptKey); }
+    try {
+      const saved = sessionStorage.getItem(receiptKey);
+      if (saved) setReceipt(JSON.parse(saved));
+    } catch { /* Storage can be unavailable; tipping still works for this visit. */ }
   }, [receiptKey]);
 
   // Screen readers and keyboards land on the confirmation, since the button they pressed is gone.
@@ -39,7 +40,7 @@ export function GuestTip({ handle, worker }: { handle: string; worker: Worker })
 
   // Desktop guests can type a custom amount as well as click the keypad.
   useEffect(() => {
-    if (!other || receipt) return;
+    if (!other || receipt || paying) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (/^[0-9.]$/.test(e.key)) setEntry((v) => typeKey(v, e.key));
@@ -47,7 +48,7 @@ export function GuestTip({ handle, worker }: { handle: string; worker: Worker })
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [other, receipt]);
+  }, [other, receipt, paying]);
 
   const first = worker.name.split(" ")[0];
   const cents = other ? entryCents(entry) : amount;
@@ -64,8 +65,9 @@ export function GuestTip({ handle, worker }: { handle: string; worker: Worker })
     try {
       const r = await tip({ handle, amountCents: cents, coverFees: cover });
       const done = { ...r, amountCents: cents, covered: cover };
-      sessionStorage.setItem(receiptKey, JSON.stringify(done));
       setReceipt(done);
+      // Storage failure must never turn a recorded tip into a retry prompt.
+      try { sessionStorage.setItem(receiptKey, JSON.stringify(done)); } catch { /* Receipt remains in memory. */ }
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -76,7 +78,7 @@ export function GuestTip({ handle, worker }: { handle: string; worker: Worker })
   }
 
   function tipAgain() {
-    sessionStorage.removeItem(receiptKey);
+    try { sessionStorage.removeItem(receiptKey); } catch { /* Storage may be blocked. */ }
     setReceipt(null);
     setEntry("");
     setOther(false);
@@ -128,21 +130,21 @@ export function GuestTip({ handle, worker }: { handle: string; worker: Worker })
           <span className="label" id="amount-label">Amount</span>
           <div className="presets" role="group" aria-labelledby="amount-label">
             {PRESETS_CENTS.map((c) => (
-              <button key={c} className="preset" aria-pressed={!other && amount === c} onClick={() => { setError(""); setOther(false); setAmount(c); }}>{money(c)}</button>
+              <button key={c} className="preset" disabled={paying} aria-pressed={!other && amount === c} onClick={() => { setError(""); setOther(false); setAmount(c); }}>{money(c)}</button>
             ))}
-            <button className="preset other" aria-pressed={other} onClick={() => { setError(""); if (!other) setEntry(""); setOther(true); }}>Other</button>
+            <button className="preset other" disabled={paying} aria-pressed={other} onClick={() => { setError(""); if (!other) setEntry(""); setOther(true); }}>Other</button>
           </div>
           {other && (
             <div className="stack rise">
               <div className="custom-amount" aria-live="polite">{entry ? "$" + entry : "$0"}</div>
-              <Keypad onKey={(k) => { setError(""); setEntry((e) => typeKey(e, k)); }} />
+              <Keypad disabled={paying} onKey={(k) => { setError(""); setEntry((e) => typeKey(e, k)); }} />
               {hint && <p className="error center" role="alert">{hint}</p>}
             </div>
           )}
         </div>
 
         <div>
-          <button className="toggle" role="switch" aria-checked={cover} onClick={() => setCover(!cover)}>
+          <button className="toggle" disabled={paying} role="switch" aria-checked={cover} onClick={() => setCover(!cover)}>
             <span>
               <span className="t-sub" style={{ display: "block" }}>Cover the fees</span>
               <span className="small muted" style={{ display: "block" }}>

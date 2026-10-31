@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ComponentProps } from "react";
 
 export function LogoMark({ size = 24 }: { size?: number }) {
   return (
@@ -10,8 +11,8 @@ export function LogoMark({ size = 24 }: { size?: number }) {
   );
 }
 
-export function Logo({ href = "/" }: { href?: string }) {
-  return <Link className="logo" href={href}><LogoMark />Tip Jar</Link>;
+export function Logo({ href = "/", onNavigate }: { href?: string; onNavigate?: ComponentProps<typeof Link>["onNavigate"] }) {
+  return <Link className="logo" href={href} onNavigate={onNavigate}><LogoMark />Tip Jar</Link>;
 }
 
 export function LegalLinks() {

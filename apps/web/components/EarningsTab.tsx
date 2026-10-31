@@ -57,7 +57,7 @@ export function EarningsTab() {
       <section className="section-line stack-lg">
         <div className="row between"><h2 className="t-sub">Last 7 days</h2><span className="strong">{money2(weekCents)}</span></div>
         {weekCents === 0 ? (
-          <p className="muted">Your week fills in as tips arrive.</p>
+          <p className="muted">Your week shows solo tips as they arrive and crew shares after the crew closes.</p>
         ) : (
           <div className="bars" role="img" aria-label={`Earnings by day: ${chartLabel}`}>
             {s.week.map((d, i) => (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 type Props = {
   open: boolean;
@@ -18,6 +18,7 @@ type Props = {
 // A native dialog traps focus, closes on Escape and returns focus to the button that opened it.
 export function ConfirmDialog({ open, title, children, confirmLabel, busyLabel, cancelLabel, busy, danger, onConfirm, onCancel }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -26,8 +27,8 @@ export function ConfirmDialog({ open, title, children, confirmLabel, busyLabel, 
   }, [open]);
 
   return (
-    <dialog ref={ref} className="dialog" aria-labelledby="dialog-title" onCancel={(e) => { e.preventDefault(); if (!busy) onCancel(); }}>
-      <h2 id="dialog-title" className="t-page">{title}</h2>
+    <dialog ref={ref} className="dialog" aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); if (!busy) onCancel(); }}>
+      <h2 id={titleId} className="t-page">{title}</h2>
       <div className="muted" style={{ marginTop: 8 }}>{children}</div>
       <div className="dialog-actions">
         <button type="button" className="btn" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
