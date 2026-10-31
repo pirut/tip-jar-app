@@ -51,6 +51,25 @@ export const keyJoinAttemptsByIdentity = internalMutation({
   },
 });
 
+// Links started being claimed for good, so printed QR codes can never change hands. After deploying:
+//   npx convex run migrations:backfillHandleClaims
+// Workers saved before this have no claim until this runs.
+export const backfillHandleClaims = internalMutation({
+  args: { cursor: v.optional(v.string()) },
+  handler: async (ctx, { cursor }): Promise<{ claimed: number; isDone: boolean }> => {
+    const { page, isDone, continueCursor } = await ctx.db.query("workers").paginate({ cursor: cursor ?? null, numItems: 100 });
+    let claimed = 0;
+    for (const worker of page) {
+      const existing = await ctx.db.query("handleClaims").withIndex("by_handle", (q) => q.eq("handle", worker.handle)).unique();
+      if (existing) continue;
+      await ctx.db.insert("handleClaims", { handle: worker.handle, tokenIdentifier: worker.tokenIdentifier, workerId: worker._id });
+      claimed++;
+    }
+    if (!isDone) await ctx.scheduler.runAfter(0, internal.migrations.backfillHandleClaims, { cursor: continueCursor });
+    return { claimed, isDone };
+  },
+});
+
 export const joinAttemptsKeyedByWorker = internalQuery({
   args: {},
   handler: async (ctx): Promise<number> => {

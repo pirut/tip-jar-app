@@ -185,10 +185,10 @@ test("counts belong to the signed-in identity, not the handle or the arguments",
   assert.match((await wrongGuess(w, "x-token")).error, blocked);
   assert.match((await wrongGuess(w, "y-token")).error, noCrew);
 
-  // Someone else taking over the freed handle doesn't inherit the block.
+  // Recreating a profile under another name doesn't inherit someone else's block.
   await w.call(workers.deleteAccount, "x-token");
   await w.call(workers.deleteAccount, "y-token");
-  await w.profile("y-token", "xav-x");
+  await w.profile("y-token", "yan-again");
   assert.match((await wrongGuess(w, "y-token")).error, noCrew);
   // The real owner of the count is still blocked under a new handle.
   await w.profile("x-token", "new-handle");

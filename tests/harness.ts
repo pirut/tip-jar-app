@@ -27,7 +27,12 @@ export const earnings = await import("../convex/earnings.ts");
 export const migrations = existsSync(new URL("../convex/migrations.ts", import.meta.url))
   ? await import("../convex/migrations.ts")
   : undefined;
-const modules: Record<string, any> = { crews, workers, tips, earnings, migrations };
+export const payments = await import("../convex/payments.ts");
+export const paymentsNode = await import("../convex/paymentsNode.ts");
+export const settlement = await import("../convex/settlement.ts");
+export const ops = await import("../convex/ops.ts");
+export const paymentsCron = await import("../convex/paymentsCron.ts");
+const modules: Record<string, any> = { crews, workers, tips, earnings, migrations, payments, paymentsNode, settlement, ops, paymentsCron };
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -57,6 +62,15 @@ function check(value: any, validator: any, path: string) {
     case "literal":
       if (value !== validator.value) fail();
       break;
+    case "array":
+      if (!Array.isArray(value)) fail();
+      value.forEach((item: any, i: number) => check(item, validator.element, `${path}[${i}]`));
+      break;
+    case "object":
+      if (typeof value !== "object" || value === null) fail();
+      for (const key of Object.keys(value)) if (!validator.fields[key]) fail();
+      for (const [key, inner] of Object.entries(validator.fields)) check(value[key], inner, `${path}.${key}`);
+      break;
     case "union":
       if (!validator.members.some((m: any) => { try { check(value, m, path); return true; } catch { return false; } })) fail();
       break;
@@ -70,8 +84,12 @@ class Query {
   table: string;
   filters: [string, unknown][];
   direction: "asc" | "desc";
+  upTo?: [string, number];
+  fields?: string[];
 
-  constructor(db: Db, table: string, filters: [string, unknown][] = [], direction: "asc" | "desc" = "asc") {
+  constructor(db: Db, table: string, filters: [string, unknown][] = [], direction: "asc" | "desc" = "asc", upTo?: [string, number], fields?: string[]) {
+    this.upTo = upTo;
+    this.fields = fields;
     this.db = db;
     this.table = table;
     this.filters = filters;
@@ -82,25 +100,40 @@ class Query {
     const index = (schema as any).tables[this.table].indexes.find((i: any) => i.indexDescriptor === name);
     if (!index) throw new Error(`${this.table} has no index ${name}`);
     const filters: [string, unknown][] = [];
+    let upTo: [string, number] | undefined;
     const range = {
       eq: (field: string, value: unknown) => {
         if (index.fields[filters.length] !== field) throw new Error(`${name} can't filter on ${field} here`);
         filters.push([field, value]);
         return range;
       },
+      lte: (field: string, value: number) => {
+        if (index.fields[filters.length] !== field) throw new Error(`${name} can't range on ${field} here`);
+        upTo = [field, value];
+        return range;
+      },
     };
     build?.(range);
-    return new Query(this.db, this.table, filters, this.direction);
+    return new Query(this.db, this.table, filters, this.direction, upTo, index.fields);
   }
 
   order(direction: "asc" | "desc") {
-    return new Query(this.db, this.table, this.filters, direction);
+    return new Query(this.db, this.table, this.filters, direction, this.upTo, this.fields);
   }
 
   rows() {
     const out = [...this.db.docs.values()].filter(
-      (doc) => doc._id.startsWith(`${this.table}:`) && this.filters.every(([k, v]) => doc[k] === v),
+      (doc) => doc._id.startsWith(`${this.table}:`) && this.filters.every(([k, v]) => doc[k] === v)
+        && (!this.upTo || doc[this.upTo[0]] <= this.upTo[1]),
     );
+    // Convex reads an index in field order, then creation order.
+    if (this.fields) {
+      const rest = this.fields.slice(this.filters.length);
+      out.sort((a, b) => {
+        for (const f of rest) if (a[f] !== b[f]) return a[f] < b[f] ? -1 : 1;
+        return 0;
+      });
+    }
     if (this.direction === "desc") out.reverse();
     return out.map((doc) => structuredClone(doc));
   }
@@ -136,6 +169,7 @@ class Db {
   }
 
   query(table: string) { return new Query(this, table); }
+  normalizeId(table: string, id: string) { return id.startsWith(`${table}:`) && this.docs.has(id) ? id : null; }
   async get(id: string) {
     const doc = this.docs.get(id);
     return doc ? structuredClone(doc) : null;
@@ -166,13 +200,21 @@ export function world() {
   let jobs: { at: number; name: string; args: any }[] = [];
   Date.now = () => now;
 
-  const ctx = (token: string | null) => ({
+  const resolve = (ref: any) => {
+    const [file, name] = getFunctionName(ref).split(":");
+    return modules[file][name];
+  };
+  const ctx = (token: string | null): any => ({
     db,
-    auth: { getUserIdentity: async () => (token ? { tokenIdentifier: token } : null) },
+    auth: { getUserIdentity: async () => (token ? { tokenIdentifier: token, email: `${token}@example.com` } : null) },
     scheduler: {
       runAt: async (at: number, ref: any, args: any) => { jobs.push({ at, name: getFunctionName(ref), args }); },
       runAfter: async (ms: number, ref: any, args: any) => { jobs.push({ at: now + ms, name: getFunctionName(ref), args }); },
     },
+    // Actions: each nested call is its own transaction, as it is on Convex.
+    runQuery: (ref: any, args: any) => call(resolve(ref), token, args),
+    runMutation: (ref: any, args: any) => call(resolve(ref), token, args),
+    runAction: (ref: any, args: any) => resolve(ref)._handler(ctx(token), args),
   });
 
   // Like a Convex mutation, a throw undoes the call's writes and scheduling.

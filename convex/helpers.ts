@@ -19,6 +19,16 @@ export async function requireWorker(ctx: QueryCtx): Promise<Doc<"workers">> {
   return worker;
 }
 
+// Who a tip link pays. A renamed link keeps paying the same person, because it may be printed
+// somewhere. A deleted worker's link stays dead rather than ever paying someone else.
+export async function resolveWorkerByHandle(ctx: QueryCtx, rawHandle: string): Promise<Doc<"workers"> | null> {
+  const handle = rawHandle.toLowerCase();
+  const worker = await ctx.db.query("workers").withIndex("by_handle", (q) => q.eq("handle", handle)).unique();
+  if (worker) return worker;
+  const claim = await ctx.db.query("handleClaims").withIndex("by_handle", (q) => q.eq("handle", handle)).unique();
+  return claim?.workerId ? await ctx.db.get(claim.workerId) : null;
+}
+
 // The crew a worker is currently in (open crew, not left), if any.
 export async function activeMembership(
   ctx: QueryCtx,

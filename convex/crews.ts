@@ -5,6 +5,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { splitMode } from "./schema";
 import { JOIN_WINDOW_MS, activeMembership, currentWorker, joinAttemptsFor, requireWorker, unsettledCrew } from "./helpers";
 import { customPercentsValid, effectiveWeights, splitCents, weightsFor, type SplitMember } from "./lib/split";
+import { allocateCrewPool, allocateSolo, payeeFor, workerStage } from "./lib/paymentsDb";
+import { entitlement } from "./lib/paymentRules";
 
 const HOUR = 60 * 60 * 1000;
 const JOIN_FAILS_ALLOWED = 5;
@@ -23,11 +25,16 @@ async function crewState(ctx: { db: MutationCtx["db"] | any }, crew: Doc<"crews"
     .collect();
   // Everyone who gets paid: people who left are still owed for their time.
   const members = rows.filter((m) => m.removedAt === undefined);
-  const tips: Doc<"tips">[] = await ctx.db
-    .query("tips")
-    .withIndex("by_crew", (q: any) => q.eq("crewId", crew._id))
-    .collect();
-  const poolCents = tips.reduce((a, t) => a + t.netCents, 0);
+  // Demo and real crews never mix. A real pool is payments Stripe has confirmed, less refunds and disputes.
+  const realTips: Doc<"tipPayments">[] = crew.moneyMode === "real"
+    ? (await ctx.db.query("tipPayments").withIndex("by_crew", (q: any) => q.eq("crewId", crew._id)).collect()).filter((p: Doc<"tipPayments">) => p.status === "succeeded" && !p.reviewReason)
+    : [];
+  const tips: Doc<"tips">[] = crew.moneyMode === "real"
+    ? []
+    : await ctx.db.query("tips").withIndex("by_crew", (q: any) => q.eq("crewId", crew._id)).collect();
+  const poolCents = crew.moneyMode === "real"
+    ? realTips.reduce((a, p) => a + entitlement(p).entitledCents, 0)
+    : tips.reduce((a, t) => a + t.netCents, 0);
   const splitInputs: SplitMember[] = members.map((m) => ({
     hours: memberHours(m, now),
     shares: m.shares,
@@ -37,7 +44,7 @@ async function crewState(ctx: { db: MutationCtx["db"] | any }, crew: Doc<"crews"
   const shares = valid ? splitCents(poolCents, effectiveWeights(crew.splitMode, splitInputs)) : null;
   // Weights that add to nothing pay out evenly; say so rather than showing surprising numbers.
   const evenFallback = valid && weightsFor(crew.splitMode, splitInputs).every((w) => w === 0);
-  return { members, poolCents, splitInputs, shares, valid, evenFallback };
+  return { members, poolCents, splitInputs, shares, valid, evenFallback, realTips };
 }
 
 export const current = query({
@@ -81,6 +88,7 @@ export const current = query({
         splitMode: crew.splitMode,
         closesAt: crew.closesAt,
         poolCents: state.poolCents,
+        real: crew.moneyMode === "real",
         splitValid: state.valid,
         evenFallback: state.evenFallback,
         iAmStarter: crew.starterId === worker._id,
@@ -120,6 +128,15 @@ export const lastClosed = query({
   },
 });
 
+// Pilot workers pool real money and everyone else pools demo money, so a crew has to be all one or the other.
+// Throws for a pilot worker who can't receive money yet, since a pool could then owe them.
+async function moneyModeFor(ctx: MutationCtx, worker: Doc<"workers">): Promise<"demo" | "real"> {
+  const { stage } = await workerStage(ctx, worker.tokenIdentifier);
+  if (stage === "demo") return "demo";
+  if (stage !== "ready") throw new ConvexError("Set up payouts before starting or joining a crew.");
+  return "real";
+}
+
 async function newCode(ctx: MutationCtx): Promise<string> {
   for (let i = 0; i < 20; i++) {
     const code = String(Math.floor(1000 + Math.random() * 9000));
@@ -141,6 +158,7 @@ export const start = mutation({
     if (name.trim().length > CREW_NAME_MAX) throw new ConvexError("That crew name is a bit long. Please shorten it.");
     const now = Date.now();
     const closesAt = now + closesInHours * HOUR;
+    const moneyMode = await moneyModeFor(ctx, worker);
     const crewId = await ctx.db.insert("crews", {
       name: name.trim() || `${(worker.workplace || worker.name).slice(0, CREW_NAME_MAX - 7)}'s crew`,
       code: await newCode(ctx),
@@ -148,6 +166,7 @@ export const start = mutation({
       splitMode,
       status: "open",
       closesAt,
+      moneyMode,
     });
     await ctx.db.insert("crewMembers", { crewId, workerId: worker._id, joinedAt: now, shares: 1, pct: 0 });
     await ctx.scheduler.runAt(closesAt, internal.crews.autoClose, { crewId });
@@ -222,6 +241,21 @@ export const join = mutation({
     const rows = await ctx.db.query("crewMembers").withIndex("by_worker", (q) => q.eq("workerId", worker._id)).collect();
     const earlier = rows.find((m) => m.crewId === crew._id);
     if (earlier?.removedAt !== undefined) return { ok: false as const, error: "The crew starter removed you from this crew." };
+    // Removal follows the sign-in, so recreating a profile doesn't get someone back into a pool.
+    const removal = await ctx.db
+      .query("crewRemovals")
+      .withIndex("by_crew_token", (q) => q.eq("crewId", crew._id).eq("tokenIdentifier", worker.tokenIdentifier))
+      .first();
+    if (removal) return { ok: false as const, error: "The crew starter removed you from this crew." };
+    const { stage } = await workerStage(ctx, worker.tokenIdentifier);
+    if ((crew.moneyMode ?? "demo") === "real" ? stage !== "ready" : stage !== "demo") {
+      return {
+        ok: false as const,
+        error: stage === "demo" ? "This crew pools real tips, and your account isn't set up for those yet."
+          : crew.moneyMode === "real" ? "Set up payouts before joining this crew."
+          : "This crew pools demo tips, and your account takes real ones.",
+      };
+    }
     if (earlier) {
       // Back from a break: same person, same one share, and earlier hours still count.
       await ctx.db.patch(earlier._id, {
@@ -271,9 +305,17 @@ export const removeMember = mutation({
     if (member.workerId === crew.starterId) throw new ConvexError("You can't remove yourself. Close the crew instead.");
     const now = Date.now();
     await ctx.db.patch(memberId, { removedAt: now, leftAt: member.leftAt ?? now });
+    const removed = await ctx.db.get(member.workerId);
+    if (removed) await ctx.db.insert("crewRemovals", { crewId: crew._id, tokenIdentifier: removed.tokenIdentifier });
     const tips = await ctx.db.query("tips").withIndex("by_crew", (q) => q.eq("crewId", crew._id)).collect();
     for (const tip of tips) {
       if (tip.workerId === member.workerId) await ctx.db.patch(tip._id, { crewId: undefined });
+    }
+    const payments = await ctx.db.query("tipPayments").withIndex("by_crew", (q) => q.eq("crewId", crew._id)).collect();
+    for (const payment of payments) {
+      if (payment.workerId !== member.workerId) continue;
+      await ctx.db.patch(payment._id, { crewId: undefined });
+      if (payment.status === "succeeded" && !payment.reviewReason) await allocateSolo(ctx, { ...payment, crewId: undefined });
     }
   },
 });
@@ -312,9 +354,22 @@ async function closeCrew(ctx: MutationCtx, crew: Doc<"crews">) {
   const state = await crewState(ctx, crew, now);
   const all = state.members;
   const start = Math.floor(now / 86400000) % Math.max(1, all.length); // rotate who gets leftover cents
-  const payouts = splitCents(state.poolCents, effectiveWeights(crew.splitMode, state.splitInputs), start);
-  for (let i = 0; i < all.length; i++) {
-    await ctx.db.patch(all[i]._id, { payoutCents: payouts[i], leftAt: all[i].leftAt ?? now });
+  const weights = effectiveWeights(crew.splitMode, state.splitInputs);
+  if (crew.moneyMode === "real") {
+    // Real pools split tip by tip, so a later refund can be taken back from exactly who got it.
+    const members = await Promise.all(all.map(async (m) => {
+      const w = await ctx.db.get(m.workerId);
+      return { workerId: m.workerId, payee: w ? await payeeFor(ctx, w.tokenIdentifier) : null };
+    }));
+    const totals = await allocateCrewPool(ctx, crew, state.realTips, members, weights);
+    for (let i = 0; i < all.length; i++) {
+      await ctx.db.patch(all[i]._id, { payoutCents: totals[i], realMoney: true, leftAt: all[i].leftAt ?? now });
+    }
+  } else {
+    const payouts = splitCents(state.poolCents, weights, start);
+    for (let i = 0; i < all.length; i++) {
+      await ctx.db.patch(all[i]._id, { payoutCents: payouts[i], leftAt: all[i].leftAt ?? now });
+    }
   }
   await ctx.db.patch(crew._id, { status: "closed", closedAt: now });
 }

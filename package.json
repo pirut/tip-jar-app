@@ -11,7 +11,8 @@
     "typecheck": "tsc -p convex --noEmit && npm run typecheck -w apps/web && npm run typecheck -w apps/mobile"
   },
   "dependencies": {
-    "convex": "^1.49.0"
+    "convex": "^1.49.0",
+    "stripe": "^23.1.0"
   },
   "devDependencies": {
     "typescript": "~5.9.3"
