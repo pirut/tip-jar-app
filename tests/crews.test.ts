@@ -323,9 +323,9 @@ test("crew names are limited on the server, like the clients", async () => {
   assert.equal(w.rows("crews")[0].name, name(60));
   await w.call(crews.close, "x-token");
 
-  // The default name comes from profile fields that have their own limits.
+  // The generated default must respect the same crew-name limit.
   await start(w, "x-token", "   ");
-  assert.equal(w.rows("crews")[1].name, `${"W".repeat(80)}'s crew`);
+  assert.equal(w.rows("crews")[1].name, `${"W".repeat(53)}'s crew`);
 });
 
 // Earnings chart

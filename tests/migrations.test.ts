@@ -58,3 +58,34 @@ test("large tables are worked through in batches", async () => {
   assert.equal(await w.call(remaining), 0);
   assert.equal(w.rows("joinAttempts").length, 250);
 });
+
+
+test("migration reconciles identity and legacy rows after a functions rollback", async () => {
+  const w = world();
+  const workerId = await w.profile("rollback-token", "rollback");
+  await w.db.insert("joinAttempts", { tokenIdentifier: "rollback-token", windowStart: Date.now(), fails: 4 });
+  await w.db.insert("joinAttempts", { workerId, windowStart: Date.now(), fails: 1 });
+  const before = JSON.stringify(w.rows("joinAttempts"));
+  await w.call(migrate, null, { dryRun: true });
+  assert.equal(JSON.stringify(w.rows("joinAttempts")), before);
+  await w.call(migrate);
+  assert.equal(w.rows("joinAttempts").length, 1);
+  assert.equal(await w.call(remaining), 0);
+  assert.match((await wrongGuess(w, "rollback-token")).error, /Too many/);
+  await w.call(workers.deleteAccount, "rollback-token");
+  await w.profile("rollback-token", "rollback");
+  assert.match((await wrongGuess(w, "rollback-token")).error, /Too many/);
+  await w.call(migrate);
+  assert.equal(w.rows("joinAttempts").length, 1);
+});
+
+test("migration doesn't revive an expired identity count when merging a legacy row", async () => {
+  const w = world();
+  const workerId = await w.profile("expired-token", "expired");
+  await w.db.insert("joinAttempts", { tokenIdentifier: "expired-token", windowStart: Date.now() - 11 * MINUTE, fails: 5 });
+  await w.db.insert("joinAttempts", { workerId, windowStart: Date.now(), fails: 1 });
+  await w.call(migrate);
+  assert.equal(w.rows("joinAttempts").length, 1);
+  assert.equal(w.rows("joinAttempts")[0].fails, 1);
+  assert.match((await wrongGuess(w, "expired-token")).error, /No open crew/);
+});

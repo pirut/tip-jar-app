@@ -25,8 +25,25 @@ export const keyJoinAttemptsByIdentity = internalMutation({
         deleted++;
         if (!dryRun) await ctx.db.delete(row._id);
       } else {
-        moved++;
-        if (!dryRun) await ctx.db.patch(row._id, { tokenIdentifier: worker.tokenIdentifier, workerId: undefined });
+        // A functions-only rollback can create a legacy row beside an identity row.
+        // Reconcile them before narrowing so identity lookups remain unique.
+        const existing = await ctx.db.query("joinAttempts")
+          .withIndex("by_token", (q) => q.eq("tokenIdentifier", worker.tokenIdentifier))
+          .unique();
+        if (existing) {
+          deleted++;
+          if (!dryRun) {
+            const existingActive = Date.now() - existing.windowStart < JOIN_WINDOW_MS;
+            await ctx.db.patch(existing._id, {
+              fails: row.fails + (existingActive ? existing.fails : 0),
+              windowStart: existingActive ? Math.max(existing.windowStart, row.windowStart) : row.windowStart,
+            });
+            await ctx.db.delete(row._id);
+          }
+        } else {
+          moved++;
+          if (!dryRun) await ctx.db.patch(row._id, { tokenIdentifier: worker.tokenIdentifier, workerId: undefined });
+        }
       }
     }
     if (!isDone) await ctx.scheduler.runAfter(0, internal.migrations.keyJoinAttemptsByIdentity, { cursor: continueCursor, dryRun });

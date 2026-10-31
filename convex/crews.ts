@@ -142,7 +142,7 @@ export const start = mutation({
     const now = Date.now();
     const closesAt = now + closesInHours * HOUR;
     const crewId = await ctx.db.insert("crews", {
-      name: name.trim() || `${worker.workplace || worker.name}'s crew`,
+      name: name.trim() || `${(worker.workplace || worker.name).slice(0, CREW_NAME_MAX - 7)}'s crew`,
       code: await newCode(ctx),
       starterId: worker._id,
       splitMode,
