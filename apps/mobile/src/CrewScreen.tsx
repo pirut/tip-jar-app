@@ -118,7 +118,7 @@ function NoCrew({ leftCrew }: { leftCrew: { name: string; closesAt: number } | n
       )}
       {last && (
         <Card>
-          <Row style={{ justifyContent: "space-between" }}><Eyebrow>Last crew · {last.name}</Eyebrow><DemoTag /></Row>
+          <Row style={{ justifyContent: "space-between" }}><Eyebrow>Last crew · {last.name}</Eyebrow>{!last.real && <DemoTag />}</Row>
           <Body small muted>Your share{last.closedAt ? `, closed ${dateTime(last.closedAt)}` : ""}</Body>
           <Big size={30}>{money2(last.myPayoutCents)}</Big>
           {last.rows.map((r, i) => (
@@ -195,7 +195,7 @@ function InCrew({ crew }: { crew: CrewData }) {
   return (
     <View style={{ gap: 16 }}>
       <View style={{ gap: 6, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.line }}>
-        <Row style={{ justifyContent: "space-between" }}><Eyebrow>{crew.name}</Eyebrow><DemoTag /></Row>
+        <Row style={{ justifyContent: "space-between" }}><Eyebrow>{crew.name}</Eyebrow>{!crew.real && <DemoTag />}</Row>
         <Big>{money2(crew.poolCents)}</Big>
         <Body muted small>in the pool · {activeCount} {activeCount === 1 ? "person" : "people"} · closes {time(crew.closesAt)}</Body>
         <Row style={{ justifyContent: "space-between", marginTop: 10, flexWrap: "wrap" }}>
@@ -280,7 +280,7 @@ function InCrew({ crew }: { crew: CrewData }) {
             <Body>Close the crew and pay everyone their share now? This can't be undone.</Body>
             {crew.evenFallback && <Body small>{split === "hours" ? "Hours are still at zero" : "All weights are zero"}, so the pool will split evenly.</Body>}
             <ErrorText>{finish.error}</ErrorText>
-            <Btn kind="primary" title={finish.busy ? "Closing…" : "Close and split (demo)"} disabled={finish.busy || edit.busy} onPress={() => finish.run(() => close({}))} />
+            <Btn kind="primary" title={finish.busy ? "Closing…" : crew.real ? "Close and split" : "Close and split (demo)"} disabled={finish.busy || edit.busy} onPress={() => finish.run(() => close({}))} />
             <Btn kind="ghost" title="Keep crew open" disabled={finish.busy} onPress={() => { setConfirming(null); finish.setError(""); }} />
           </Banner>
         ) : (

@@ -3,6 +3,7 @@ import { Text, View } from "react-native";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { dateTime, errorText, money2 } from "./format";
+import { RealEarnings } from "./RealEarnings";
 import { useColors } from "./theme";
 import { useDayStart } from "./useDayStart";
 import { Banner, Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Loading, Row, Success, announce } from "./ui";
@@ -10,6 +11,12 @@ import { Banner, Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Loadin
 const dayName = (start: number, format: "narrow" | "long") => new Date(start + 12 * 3600000).toLocaleDateString([], { weekday: format });
 
 export function EarningsScreen() {
+  const status = useQuery(api.payments.status);
+  if (status === undefined) return <Loading />;
+  return status && status.stage !== "demo" ? <RealEarnings /> : <DemoEarnings />;
+}
+
+function DemoEarnings() {
   const c = useColors();
   const dayStart = useDayStart();
   const s = useQuery(api.earnings.summary, { dayStart });

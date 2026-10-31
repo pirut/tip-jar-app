@@ -17,7 +17,7 @@ import { ProfileScreen } from "./src/ProfileScreen";
 import { TipsScreen } from "./src/TipsScreen";
 import { CrewScreen, useInCrew } from "./src/CrewScreen";
 import { EarningsScreen } from "./src/EarningsScreen";
-import { Avatar, Banner, Body, Btn, ConnectionBar, DemoBar, ErrorBoundary, FONT, Loading, Row, Success, announce } from "./src/ui";
+import { Avatar, Banner, Body, Btn, ConnectionBar, ErrorBoundary, FONT, Loading, MoneyBar, Row, Success, announce } from "./src/ui";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -56,6 +56,7 @@ function Root() {
   const { isSignedIn } = useAuth();
   const me = useQuery(api.workers.me, isAuthenticated ? {} : "skip");
   const inCrew = useInCrew(isAuthenticated);
+  const payments = useQuery(api.payments.status, isAuthenticated ? {} : "skip");
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [tab, setTab] = useState<Tab>("tips");
   const [editing, setEditing] = useState(false);
@@ -142,7 +143,7 @@ function Root() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "left", "right"]}>
       <StatusBar style="auto" />
-      <DemoBar />
+      {!(isAuthenticated && payments === undefined) && <MoneyBar stage={payments?.stage} testMode={payments?.testMode} />}
       <ConnectionBar />
       {/* iOS has the ScrollView lift the focused field itself; KeyboardAvoidingView covers Android's edge-to-edge window. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "android" ? "padding" : undefined}>

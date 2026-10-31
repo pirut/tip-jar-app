@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { api } from "@convex/_generated/api";
 import { LegalLinks, Logo } from "@/components/Brand";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { DemoBar } from "@/components/DemoBar";
+import { DemoBar, MoneyBar } from "@/components/DemoBar";
 import { IconCrew, IconEarnings, IconTips } from "@/components/Icons";
 import { SignIn } from "@/components/SignIn";
 import { ProfileForm } from "@/components/ProfileForm";
@@ -48,6 +48,8 @@ export default function WorkerApp() {
   const me = useQuery(api.workers.me, isAuthenticated ? {} : "skip");
   const crew = useQuery(api.crews.current, isAuthenticated ? {} : "skip");
   const removeData = useMutation(api.workers.deleteAccount);
+  const payments = useQuery(api.payments.status, isAuthenticated ? {} : "skip");
+  const refreshBalance = useAction(api.paymentsNode.refreshBalance);
   const { user } = useUser();
   const { signOut } = useClerk();
   const [tab, setTabState] = useState<Tab>("tips");
@@ -83,6 +85,8 @@ export default function WorkerApp() {
   async function deleteAccount() {
     setDeletion("data");
     try {
+      // Deleting is refused while there's money in Stripe, so ask Stripe rather than trust an old figure.
+      if (payments?.hasAccount) await refreshBalance({});
       await removeData({});
     } catch (e) {
       setDeletion(null);
@@ -99,7 +103,7 @@ export default function WorkerApp() {
         {deletion === "failed" ? (
           <main className="center-body" role="alert">
             <h1 className="t-title">Your account is only partly deleted</h1>
-            <p className="muted">Your Tip Jar profile, tips and cash-outs are gone, but your sign-in account couldn&apos;t be removed. Try again below. If you need to sign in again, choose Delete my sign-in account on the setup screen.</p>
+            <p className="muted">Your Tip Jar profile and demo records are gone, but your sign-in account couldn&apos;t be removed. Try again below. If you need to sign in again, choose Delete my sign-in account on the setup screen.</p>
             <div className="row wrap">
               <button className="btn primary" onClick={deleteSignIn}>Try again</button>
               <button className="btn" onClick={leave}>Sign out</button>
@@ -156,7 +160,7 @@ export default function WorkerApp() {
 
   return (
     <>
-      <DemoBar />
+      {payments !== undefined && <MoneyBar stage={payments?.stage} testMode={payments?.testMode} />}
       <div className="shell">
         <header className="appbar">
           <Logo href="/app" onNavigate={(e) => { e.preventDefault(); setTab("tips"); }} />
@@ -175,7 +179,7 @@ export default function WorkerApp() {
           {tab === "tips" && <TipsTab handle={worker.handle} name={worker.name} />}
           {tab === "crew" && <CrewTab />}
           {tab === "earn" && <EarningsTab />}
-          {tab === "profile" && <ProfileForm initial={worker} email={user?.primaryEmailAddress?.emailAddress} onDone={() => setTab("tips")} onCancel={() => setTab("tips")} onSignOut={leave} onDelete={deleteAccount} />}
+          {tab === "profile" && <ProfileForm initial={worker} email={user?.primaryEmailAddress?.emailAddress} keepsRecords={!!payments?.hasAccount} onDone={() => setTab("tips")} onCancel={() => setTab("tips")} onSignOut={leave} onDelete={deleteAccount} />}
         </main>
       </div>
     </>

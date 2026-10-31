@@ -103,7 +103,7 @@ Go-to-market: run phases 1–3 with the pilot operator's staff while their worke
 - **Disputes and chargebacks** on tips that were already split. Plan: hold a small reserve per group, or claw back from the next pool.
 - **Fraud.** A worker tipping themselves with stolen cards to cash out instantly. Plan: limits on instant payout for new accounts, Stripe Radar.
 
-## 7. Decisions (JR, 2026-10-30)
+## 7. Decisions (JR, 2026-10-30, updated 2026-10-31)
 | Question | Decision |
 |---|---|
 | Preset tip amounts | $5 / $10 / $20 for every job type |
@@ -118,3 +118,5 @@ Go-to-market: run phases 1–3 with the pilot operator's staff while their worke
 | Revenue | Small platform fee per tip |
 | Physical NFC badge / key tag | Later; printable QR codes first |
 | Launch market | US only |
+| Tap to Pay | Held off for the pilot. QR tips first; Tap to Pay needs an organization Apple account |
+| Payments model | Platform charges guests; workers get connected accounts behind the scenes and Stripe collects their identity and bank details |

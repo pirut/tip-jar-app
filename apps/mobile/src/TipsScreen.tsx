@@ -8,7 +8,8 @@ import { MAX_TIP_CENTS, MIN_TIP_CENTS, PRESETS_CENTS, feesCents } from "../../..
 import { TIP_ORIGIN, dateTime, entryCents, errorText, money, money2, time, typeKey } from "./format";
 import { useColors } from "./theme";
 import { useDayStart } from "./useDayStart";
-import { Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Row, Success, announce, shareText } from "./ui";
+import { PayoutSetupCard } from "./RealEarnings";
+import { Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Row, Success, TestTag, announce, shareText } from "./ui";
 
 type Step = "home" | "amount" | "tap" | "qr";
 const KEY_ROWS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], [".", "0", "del"]];
@@ -18,6 +19,8 @@ export function TipsScreen({ handle, name, inCrew, onFlowChange, joinPrompt, onT
   const dayStart = useDayStart();
   const today = useQuery(api.tips.today, { dayStart });
   const recordTap = useMutation(api.tips.recordTap);
+  const payments = useQuery(api.payments.status);
+  const real = !!payments && payments.stage !== "demo";
   const { height } = useWindowDimensions();
   const compact = height < 700; // keeps the keypad and Charge button on one screen on small phones
   const [step, setStep] = useState<Step>("home");
@@ -46,7 +49,7 @@ export function TipsScreen({ handle, name, inCrew, onFlowChange, joinPrompt, onT
     return () => sub.remove();
   }, [step, busy]);
 
-  // Tap to Pay: simulated until Stripe Terminal is wired in (needs a dev build and Apple's Tap to Pay entitlement).
+  // Demo accounts only: a simulated tap. Real Tap to Pay is coming later, and the server refuses this for pilot workers.
   async function guestTapped() {
     if (busy) return;
     setError("");
@@ -75,7 +78,9 @@ export function TipsScreen({ handle, name, inCrew, onFlowChange, joinPrompt, onT
         </View>
         <Body style={{ textAlign: "center" }}>Guests scan it and tip in seconds, with no app.</Body>
         <Body small muted>{link.replace(/^https?:\/\//, "")}</Body>
-        <Row><DemoTag /><Body muted small>The tip page is simulated. No card is charged.</Body></Row>
+        {real
+          ? payments.testMode && <Row><TestTag /><Body muted small>Stripe test payments only. No real money moves.</Body></Row>
+          : <Row><DemoTag /><Body muted small>The tip page is simulated. No card is charged.</Body></Row>}
         <Btn kind="primary" title="Share my link" style={{ alignSelf: "stretch" }} onPress={() => shareText(`Tip ${name}: ${link}`)} />
         <Btn kind="ghost" title="Done" onPress={exit} />
       </View>
@@ -144,23 +149,33 @@ export function TipsScreen({ handle, name, inCrew, onFlowChange, joinPrompt, onT
   return (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
-        <Row><Eyebrow>Tips today</Eyebrow><DemoTag /></Row>
+        <Row><Eyebrow>Tips today</Eyebrow>{!real ? <DemoTag /> : payments.testMode ? <TestTag /> : null}</Row>
         <Big>{today ? money2(today.totalCents) : "—"}</Big>
         {today && today.crewCents > 0 && <Body muted small>{money2(today.crewCents)} went to your crew pool</Body>}
       </View>
       {last ? <Success demo>{last}</Success> : null}
       {joinPrompt}
-      <Btn kind="primary" title="Accept a tip" onPress={() => { setLast(""); setEntry(""); setStep("amount"); }} style={{ paddingVertical: 24, borderRadius: 14 }} />
-      <Btn title="Show my QR code" onPress={() => setStep("qr")} />
+      {real ? (
+        <>
+          <PayoutSetupCard stage={payments.stage} />
+          <Btn kind="primary" title="Show my QR code" onPress={() => setStep("qr")} style={{ paddingVertical: 24, borderRadius: 14 }} />
+          <Body muted small style={{ textAlign: "center" }}>Tap to Pay on this phone is coming later. For now, guests tip by scanning your QR code.</Body>
+        </>
+      ) : (
+        <>
+          <Btn kind="primary" title="Accept a tip" onPress={() => { setLast(""); setEntry(""); setStep("amount"); }} style={{ paddingVertical: 24, borderRadius: 14 }} />
+          <Btn title="Show my QR code" onPress={() => setStep("qr")} />
+        </>
+      )}
       <Card>
         <Eyebrow>Recent</Eyebrow>
         {today === undefined && <Body muted small>Loading…</Body>}
-        {today?.recent.length === 0 && <Body muted small>No tips yet. Accept one above, or show guests your QR code.</Body>}
+        {today?.recent.length === 0 && <Body muted small>{real ? "No tips yet. Show guests your QR code." : "No tips yet. Accept one above, or show guests your QR code."}</Body>}
         {today?.recent.slice(0, 8).map((t) => (
           <Row key={t._id} style={{ justifyContent: "space-between" }}>
             <View style={{ flexShrink: 1 }}>
               <Body>{t.payerLabel}</Body>
-              <Body muted small>{t.at >= dayStart ? time(t.at) : dateTime(t.at)} · {t.source === "qr" ? "QR code" : "Tap to Pay"}{t.toCrew ? " · to crew pool" : ""}{t.demo ? " · Demo" : ""}</Body>
+              <Body muted small>{t.at >= dayStart ? time(t.at) : dateTime(t.at)} · {t.source === "qr" ? "QR code" : "Tap to Pay"}{t.toCrew ? " · to crew pool" : ""}{t.demo ? " · Demo" : ""}{t.test ? " · Test" : ""}{t.refunded ? " · Refunded" : ""}{t.disputed ? " · Disputed" : ""}</Body>
             </View>
             <Text style={{ color: c.ink, fontFamily: FONT.bodyBold, fontVariant: ["tabular-nums"] }}>+{money2(t.netCents)}</Text>
           </Row>

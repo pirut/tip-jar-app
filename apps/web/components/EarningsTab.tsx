@@ -4,12 +4,19 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { RealEarnings } from "@/components/RealEarnings";
 import { errorText, money2, time } from "@/lib/format";
 import { useDayStart } from "@/lib/useDayStart";
 
 const dayName = (ms: number, weekday: "narrow" | "long") => new Date(ms + 12 * 3600000).toLocaleDateString([], { weekday });
 
 export function EarningsTab() {
+  const status = useQuery(api.payments.status);
+  if (status === undefined) return <div className="skel" style={{ height: 200 }} aria-busy="true" aria-label="Loading" />;
+  return status && status.stage !== "demo" ? <RealEarnings /> : <DemoEarnings />;
+}
+
+function DemoEarnings() {
   const dayStart = useDayStart();
   const s = useQuery(api.earnings.summary, { dayStart });
   const cashOut = useMutation(api.earnings.cashOutInstant);

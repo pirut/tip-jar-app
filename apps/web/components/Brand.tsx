@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SupportLink } from "./SupportLink";
 import type { ComponentProps } from "react";
 
 export function LogoMark({ size = 24 }: { size?: number }) {
@@ -20,6 +21,7 @@ export function LegalLinks() {
     <nav className="legal-links" aria-label="Legal">
       <Link href="/privacy">Privacy</Link>
       <Link href="/terms">Terms</Link>
+      <SupportLink />
     </nav>
   );
 }
