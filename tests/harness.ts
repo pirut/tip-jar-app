@@ -243,6 +243,8 @@ export function world() {
   return {
     db,
     call,
+    // Actions aren't transactions: what they already did stays even if they throw.
+    act: (fn: any, token: string | null = null, args: any = {}) => fn._handler(ctx(token), args),
     runDueJobs,
     jobs: () => jobs,
     advance: (ms: number) => { now += ms; },

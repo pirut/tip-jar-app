@@ -168,8 +168,8 @@ export function ledgerTotals(rows: LedgerRow[]) {
     balance[r.debit] += r.amountCents;
     balance[r.credit] -= r.amountCents;
   }
-  const workerLiabilityCents = -balance.worker_liability;
-  const feesCollectedCents = -balance.platform_fees;
+  const workerLiabilityCents = 0 - balance.worker_liability;
+  const feesCollectedCents = 0 - balance.platform_fees;
   const platformRevenueCents = feesCollectedCents - balance.processing_cost - balance.dispute_fees;
   return { expectedStripeBalanceCents: balance.stripe_balance, workerLiabilityCents, feesCollectedCents, processingCostCents: balance.processing_cost, disputeFeesCents: balance.dispute_fees, platformRevenueCents };
 }
