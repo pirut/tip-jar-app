@@ -1,6 +1,6 @@
 # Payment architecture and pilot gates
 
-Status: design for the real-money pilot. Checked against Stripe's docs and `stripe@23.1.0` (API `2026-10-28.endive`), `@stripe/stripe-terminal-react-native@0.0.1-beta.34` on 2026-10-31. Not legal or tax advice. Nothing here has had legal review.
+Status: design for the real-money pilot. Checked against Stripe's docs and `stripe@23.1.0` (API `2026-10-28.endive`) on 2026-10-31. Not legal or tax advice. Nothing here has had legal review.
 
 ## The short answers
 
@@ -17,8 +17,9 @@ Status: design for the real-money pilot. Checked against Stripe's docs and `stri
 Separate charges and transfers, for solo workers and crews alike. Not destination charges, because crew shares aren't known until the crew closes.
 
 - The platform is merchant of record. Guests see Tip Jar on their statement.
-- Connected accounts use Accounts v2 with only the recipient configuration: `dashboard: "express"`, `fees_collector` and `losses_collector` both `application`, `stripe_balance.stripe_transfers` requested. Stripe requires exactly this for recipient-only accounts.
+- Connected accounts use Accounts v2 with only the recipient configuration. Workers just see "Set up payouts"; the account is created behind the scenes and Stripe collects identity and bank details on its own pages. Settings: `dashboard: "express"`, `fees_collector` and `losses_collector` both `application`, `stripe_balance.stripe_transfers` requested. Stripe requires exactly this for recipient-only accounts.
 - `on_behalf_of` is not used. Recipient accounts can't take it. No `application_fee_amount`: our fee is what we don't transfer.
+- Accounts v2 has to be switched on for the platform in the Dashboard. Until then `STRIPE_CONNECT_API=v1` creates the same recipient setup with v1 controller properties, which is what the sandbox uses today.
 - **The platform carries the risk.** Refunds, chargebacks, dispute fees and any negative worker balance debit the platform. Keep working capital in the Stripe balance and don't withdraw everything.
 
 ### Where a tip's money goes
@@ -29,7 +30,7 @@ Separate charges and transfers, for solo workers and crews alike. Not destinatio
 | Owed to workers (`netCents`) | tip | tip − fees |
 | Kept by platform | fees | fees |
 
-`fees = cardFeeCents(tip) + 25¢`, unchanged from `convex/lib/money.ts`. The card part is an estimate of 2.9% + 30¢ of the *tip*. Stripe charges on the grossed-up total, so online tips run a few cents short (a $5 tip: 45¢ estimated, 47¢ actual, so 23¢ kept rather than 25¢). Tap to Pay pricing differs. Each charge's real fee comes from its balance transaction and is booked separately. I kept the formula because no change is required for safety, and the difference is visible in the books.
+`fees = cardFeeCents(tip) + 25¢`, unchanged from `convex/lib/money.ts`. The card part is an estimate of 2.9% + 30¢ of the *tip*. Stripe charges on the grossed-up total, so online tips run a few cents short (a $5 tip: 45¢ estimated, 47¢ actual, so 23¢ kept rather than 25¢). Each charge's real fee comes from its balance transaction and is booked separately. I kept the formula because no change is required for safety, and the difference is visible in the books.
 
 ### Unit economics, to decide before scaling
 
@@ -41,17 +42,8 @@ A worker with one payout in a month, on 20 $10 tips: 20 × ~25¢ = ~$5.00 kept, 
 
 1. The guest presses Pay. Public action `paymentsNode.createGuestCheckout` calls `payments.reservePayment`, a transaction that enforces the kill switch, enrollment, account readiness, limits and rate limits and creates a `tipPayments` row with server-computed amounts. The client sends only handle, tip amount, cover-fees and a request id.
 2. The action re-checks the worker's Stripe capability and creates a Checkout Session with idempotency key `checkout:<rowId>` and `metadata.tipPaymentId`. No `payment_method_types`, so Apple Pay and Google Pay appear according to Dashboard settings.
-3. The browser goes to Stripe. On return, the page shows state from our database and asks the server to re-fetch from Stripe. **The return URL never marks anything paid.**
+3. The browser goes to Stripe's hosted page, so card data never reaches our code or database. We store card brand only. On return, the page shows state from our database and asks the server to re-fetch from Stripe. **The return URL never marks anything paid.**
 4. Stripe's signed webhook triggers the sync below.
-
-### Tap to Pay on iPhone (Stripe Terminal SDK)
-
-1. `paymentsNode.terminalConnectionToken` needs a signed-in, enrolled, ready worker.
-2. `paymentsNode.createTapPayment` reserves the same way and creates a PaymentIntent with `payment_method_types: ["card_present"]` and `capture_method: "automatic"`, on the platform account.
-3. The app calls `retrievePaymentIntent(clientSecret)` then `processPaymentIntent`, reusing the same PaymentIntent after a decline to avoid double charges.
-4. The app calls `paymentsNode.syncTap`, which only triggers a server fetch from Stripe. **What the client reports is never trusted**; earnings are recorded by the same sync as everything else.
-
-Card data goes to Stripe's SDK on the phone and Stripe's hosted page. It never reaches our code or database. We store card brand only.
 
 ### Sync: how money facts enter our database
 
@@ -145,7 +137,6 @@ Nothing real happens unless every gate passes, and all are checked on the server
 | Worker enrolled | `pilotEnrollments`, internal functions only | Not enrolled: demo |
 | Worker's `stripe_transfers` capability `active`, not frozen | `payeeAccounts`, re-checked with Stripe before charging and transferring | Not ready: guest sees "can't take tips yet" |
 | Limits | per tip $100, per worker $500/day, all workers $2,500/day | Can be tightened per worker |
-| Tap to Pay | `TERMINAL_LOCATION_ID` on the backend, native SDK present, entitlement in the build | Off |
 
 No public mutation writes to `tipPayments`, `allocations`, `ledgerEntries`, `payeeAccounts`, `pilotEnrollments` or `paymentControls`. A test enforces the list of public mutations. `tipFromGuest`, `recordTap` and `cashOutInstant` still exist for demo users, write only `demo: true`, and reject enrolled workers.
 
@@ -159,14 +150,15 @@ Deleting an account:
 
 **Handle ownership is permanent.** `handleClaims` keeps one row per handle ever used, tied to the sign-in identity. A printed QR can never start paying a different person: old handles keep resolving to the same worker after a rename, deleted handles show "not found" and can only be taken back by the same identity.
 
-## Tap to Pay status
+## Tap to Pay: deferred
 
-Build gating, so normal builds don't break:
+The owner decided on 2026-10-31 to hold off. The pilot has no Terminal SDK, native dependency, entitlement or Apple requirement. Real pilot workers see "Tap to Pay: coming later" and take tips by QR. The simulated tap still exists for demo accounts, writes only `tips` with `demo: true`, and is refused for anyone enrolled.
 
-- `apps/mobile/app.config.ts` adds `com.apple.developer.proximity-reader.payment.acceptance` only when `TAP_TO_PAY_ENTITLEMENT=1`. A preview build without it signs as before, and the UI says Tap to Pay isn't available.
-- The app loads the Terminal SDK lazily, only if the native module is in the binary, so Expo Go, web export and old binaries don't crash.
+For when it comes back:
 
-Still needed outside this repo, and not provable from Linux: see the runbook.
+- Apple's entitlement form requires an organization Developer account and its Account Holder. The current team is individual.
+- Terminal fits this model: PaymentIntents and locations on the platform, the same reservation, sync and allocation path as Checkout.
+- A sandbox PaymentIntent created with `allowed_payment_method_types: ["card_present"]` was accepted. Nothing further was tested.
 
 ## Decisions I made that you can overrule
 

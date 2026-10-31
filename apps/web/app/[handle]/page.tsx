@@ -5,7 +5,7 @@ import { fetchQuery } from "convex/nextjs";
 import { api } from "@convex/_generated/api";
 import { GuestTip } from "@/components/GuestTip";
 
-type Props = { params: Promise<{ handle: string }> };
+type Props = { params: Promise<{ handle: string }>; searchParams: Promise<{ paid?: string }> };
 
 const getWorker = cache((handle: string) => fetchQuery(api.workers.byHandle, { handle }));
 
@@ -15,9 +15,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 // Rendered on the server so a guest on a weak signal sees the worker and presets at once.
-export default async function GuestTipPage({ params }: Props) {
+export default async function GuestTipPage({ params, searchParams }: Props) {
   const { handle } = await params;
+  const { paid } = await searchParams;
   const worker = await getWorker(handle);
   if (!worker) notFound();
-  return <GuestTip handle={handle} worker={worker} />;
+  return <GuestTip handle={handle} worker={worker} paidSession={paid} />;
 }

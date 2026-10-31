@@ -122,7 +122,7 @@ export const lastClosed = query({
           .filter((x) => x.payoutCents !== undefined && x.removedAt === undefined)
           .map(async (x) => ({ name: (await ctx.db.get(x.workerId))?.name ?? "Someone", payoutCents: x.payoutCents! })),
       );
-      return { name: crew.name, splitMode: crew.splitMode, closedAt: crew.closedAt, myPayoutCents: m.payoutCents, rows };
+      return { name: crew.name, splitMode: crew.splitMode, closedAt: crew.closedAt, myPayoutCents: m.payoutCents, rows, real: crew.moneyMode === "real" };
     }
     return null;
   },

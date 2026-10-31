@@ -32,7 +32,6 @@ export const status = query({
     const { stage, payee, enrollment } = await workerStage(ctx, worker.tokenIdentifier);
     const mode = configuredMode();
     const controls = await getControls(ctx);
-    const locationId = process.env.TERMINAL_LOCATION_ID;
     return {
       stage,
       testMode: mode === "test",
@@ -43,7 +42,6 @@ export const status = query({
         perTipCents: Math.min(controls.perTipLimitCents, enrollment.perTipLimitCents ?? Infinity),
         dailyCents: Math.min(controls.workerDailyLimitCents, enrollment.dailyLimitCents ?? Infinity),
       } : null,
-      tapToPay: stage === "ready" && locationId ? { locationId, merchantDisplayName: process.env.TERMINAL_MERCHANT_NAME ?? "Tip Jar" } : null,
     };
   },
 });
@@ -124,12 +122,11 @@ export const payeeByStripeId = internalQuery({
 export const reservePayment = internalMutation({
   args: {
     workerId: v.id("workers"),
-    channel: v.union(v.literal("checkout"), v.literal("terminal")),
     tipCents: v.number(),
     coverFees: v.boolean(),
     clientRequestId: v.string(),
   },
-  handler: async (ctx, { workerId, channel, tipCents, coverFees, clientRequestId }) => {
+  handler: async (ctx, { workerId, tipCents, coverFees, clientRequestId }) => {
     const worker = await ctx.db.get(workerId);
     if (!worker) throw new ConvexError("We couldn't find that person.");
     if (!Number.isInteger(tipCents) || tipCents < MIN_TIP_CENTS || tipCents > MAX_TIP_CENTS) {
@@ -173,7 +170,7 @@ export const reservePayment = internalMutation({
     const tipPaymentId = await ctx.db.insert("tipPayments", {
       workerId,
       payeeAccountId: payee._id,
-      channel,
+      channel: "checkout",
       livemode: payee.livemode,
       status: "creating",
       ...amounts,
@@ -214,18 +211,6 @@ export const attachCheckout = internalMutation({
   },
 });
 
-export const attachIntent = internalMutation({
-  args: { tipPaymentId: v.id("tipPayments"), paymentIntentId: v.string() },
-  handler: async (ctx, { tipPaymentId, paymentIntentId }) => {
-    const tip = await ctx.db.get(tipPaymentId);
-    if (!tip) return;
-    await ctx.db.patch(tip._id, {
-      stripePaymentIntentId: paymentIntentId,
-      status: tip.status === "creating" ? "open" : tip.status,
-    });
-  },
-});
-
 // Stripe never took money on this one. A late success still wins in applyPaymentSnapshot.
 export const closeUnpaid = internalMutation({
   args: { tipPaymentId: v.id("tipPayments"), status: v.union(v.literal("expired"), v.literal("canceled"), v.literal("failed")) },
@@ -244,7 +229,6 @@ const snapshotValidator = v.object({
   currency: v.string(),
   livemode: v.boolean(),
   metadataTipPaymentId: v.optional(v.string()),
-  paymentMethodTypes: v.array(v.string()),
   chargeId: v.optional(v.string()),
   paidAt: v.optional(v.number()),
   stripeFeeCents: v.optional(v.number()),

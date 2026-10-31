@@ -163,6 +163,27 @@ export function DemoTag() {
 }
 
 // Payments are simulated until Stripe is connected, and every money screen has to say so.
+export function TestTag() {
+  const c = useColors();
+  return (
+    <View style={{ backgroundColor: c.demoBg, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 }}>
+      <Text maxFontSizeMultiplier={1.4} style={{ fontSize: 12, color: c.demoInk, fontFamily: FONT.bodyBold }}>Test</Text>
+    </View>
+  );
+}
+
+// Demo and test money must never look real. Live money gets no bar.
+export function MoneyBar({ stage, testMode }: { stage?: string; testMode?: boolean }) {
+  const c = useColors();
+  if (stage === undefined || stage === "demo") return <DemoBar />;
+  if (!testMode) return null;
+  return (
+    <View accessibilityRole="text" style={{ backgroundColor: c.demoBg, paddingVertical: 6, paddingHorizontal: 12 }}>
+      <Text maxFontSizeMultiplier={1.5} style={{ color: c.demoInk, textAlign: "center", fontSize: 13, fontFamily: FONT.body }}><Text style={{ fontFamily: FONT.bodyBold }}>Test mode.</Text> Stripe test payments only. No real money moves.</Text>
+    </View>
+  );
+}
+
 export function DemoBar() {
   const c = useColors();
   return (

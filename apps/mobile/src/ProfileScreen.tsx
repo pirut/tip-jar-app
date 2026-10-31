@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BackHandler, View } from "react-native";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useAuth, useUser } from "@clerk/expo";
 import { api } from "../../../convex/_generated/api";
 import { TIP_ORIGIN, errorText, time } from "./format";
@@ -14,6 +14,8 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
   const save = useMutation(api.workers.saveProfile);
   const remove = useMutation(api.workers.deleteAccount);
   const crew = useQuery(api.crews.current, initial ? {} : "skip");
+  const payments = useQuery(api.payments.status, initial ? {} : "skip");
+  const refreshBalance = useAction(api.paymentsNode.refreshBalance);
   const { signOut } = useAuth();
   const { user } = useUser();
   const [p, setP] = useState<Profile>({
@@ -67,6 +69,8 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
     setDeleting(true);
     if (!dataAlreadyGone) {
       try {
+        // Deleting is refused while there's money in Stripe, so ask Stripe rather than trust an old figure.
+        if (payments?.hasAccount) await refreshBalance({});
         await remove({});
       } catch (e) {
         setDeleteError(errorText(e));
@@ -91,7 +95,7 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
     return deleting ? <Loading label="Deleting your account…" /> : (
       <View style={{ gap: 14 }}>
         <Title>Your account is only partly deleted</Title>
-        <Body>Your Tip Jar profile, tips and cash-out history are deleted. Your sign-in account still exists, so this email can still sign in. If trying again keeps failing, sign out, sign back in, and choose Delete my sign-in account on the setup screen.</Body>
+        <Body>Your Tip Jar profile is deleted. Your sign-in account still exists, so this email can still sign in. If trying again keeps failing, sign out, sign back in, and choose Delete my sign-in account on the setup screen.</Body>
         <ErrorText>{deleteError}</ErrorText>
         <Btn kind="danger" title="Try again" onPress={() => deleteAccount(true)} />
         <Btn kind="ghost" title="Sign out" onPress={logOut} />
@@ -107,7 +111,7 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
       <Field label="Your name" value={p.name} maxLength={60} autoComplete="name" onChangeText={(name) => setP({ ...p, name })} />
       <Field label={`Your link: ${TIP_ORIGIN.replace(/^https?:\/\//, "")}/…`} value={p.handle} maxLength={30} autoCapitalize="none" autoCorrect={false}
         onChangeText={(h) => setP({ ...p, handle: h.toLowerCase().replace(/[^a-z0-9-]/g, "") })} placeholder="marcus" />
-      {!!initial && initial.handle !== p.handle && <Body small style={{ color: c.demoInk }}>Changing your link breaks any QR codes you've already printed.</Body>}
+      {!!initial && initial.handle !== p.handle && <Body small muted>QR codes you've already printed keep working and still pay you.</Body>}
       <Field label="Job" value={p.jobTitle} maxLength={60} onChangeText={(jobTitle) => setP({ ...p, jobTitle })} />
       <Field label="Where you work" value={p.workplace} maxLength={80} onChangeText={(workplace) => setP({ ...p, workplace })} placeholder="The Harbor Hotel" />
       <ErrorText>{error}</ErrorText>
@@ -119,7 +123,9 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
       {confirmDelete ? (
         <Banner>
           <Body>{initial
-            ? "Delete your account, tips and cash-out history? This can't be undone."
+            ? payments?.hasAccount
+              ? "Delete your account? Records of real tips and payouts are kept, as the law and our books require. This can't be undone."
+              : "Delete your account, tips and cash-out history? This can't be undone."
             : "Delete your sign-in account? You have no Tip Jar profile yet, so that's all there is to remove. This can't be undone."}</Body>
           <ErrorText>{deleteError}</ErrorText>
           <Btn kind="danger" title={initial ? "Delete my account" : "Delete my sign-in account"} onPress={() => deleteAccount(!initial)} />

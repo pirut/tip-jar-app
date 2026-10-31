@@ -49,7 +49,7 @@ export function CrewTab() {
 
 type Preview = { name: string; splitMode: SplitMode; closesAt: number; starterName: string; memberCount: number };
 
-function NoCrew({ last, leftCrew }: { last: { name: string; myPayoutCents: number; rows: { name: string; payoutCents: number }[] } | null; leftCrew: { name: string; closesAt: number } | null }) {
+function NoCrew({ last, leftCrew }: { last: { name: string; myPayoutCents: number; real: boolean; rows: { name: string; payoutCents: number }[] } | null; leftCrew: { name: string; closesAt: number } | null }) {
   const start = useMutation(api.crews.start);
   const join = useMutation(api.crews.join);
   const lookup = useMutation(api.crews.lookup);
@@ -140,7 +140,7 @@ function NoCrew({ last, leftCrew }: { last: { name: string; myPayoutCents: numbe
 
       {last && (
         <section className="section-line stack" style={{ maxWidth: 560 }}>
-          <div className="row between"><h2 className="t-sub">Last crew: {last.name}</h2><span className="demo-tag">Demo</span></div>
+          <div className="row between"><h2 className="t-sub">Last crew: {last.name}</h2>{!last.real && <span className="demo-tag">Demo</span>}</div>
           <div className="rows">
             {last.rows.map((r, i) => <div className="line" key={i}><span>{r.name}</span><span>{money2(r.payoutCents)}</span></div>)}
             <div className="line total"><span>Your share</span><span>{money2(last.myPayoutCents)}</span></div>
@@ -215,7 +215,7 @@ function InCrew({ crew }: { crew: CrewData }) {
     <div className="stack-lg" style={{ gap: 24, maxWidth: 640 }}>
       <div className="crew-head">
         <div className="stack" style={{ gap: 4 }}>
-          <h1 className="stat-head">{crew.name} <span className="demo-tag">Demo</span></h1>
+          <h1 className="stat-head">{crew.name} {!crew.real && <span className="demo-tag">Demo</span>}</h1>
           <div className="amount">{money2(crew.poolCents)}</div>
           <p className="small muted">In the pool, {activeCount} {activeCount === 1 ? "person" : "people"}, closes at {time(crew.closesAt)}</p>
         </div>

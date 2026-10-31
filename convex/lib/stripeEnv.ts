@@ -14,7 +14,7 @@ export function keyMode(key: string): StripeMode | null {
   return null;
 }
 
-export function requireStripeConfig(env: { STRIPE_MODE?: string; STRIPE_SECRET_KEY?: string } = process.env): { mode: StripeMode; key: string } {
+export function requireStripeConfig(env: Record<string, string | undefined> = process.env): { mode: StripeMode; key: string } {
   const mode = configuredMode(env.STRIPE_MODE);
   if (!mode) throw new Error("STRIPE_MODE isn't set on this deployment");
   const key = env.STRIPE_SECRET_KEY;

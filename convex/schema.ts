@@ -152,7 +152,7 @@ export default defineSchema({
   tipPayments: defineTable({
     workerId: v.id("workers"), // may point at a deleted profile; these records are kept
     payeeAccountId: v.id("payeeAccounts"),
-    channel: v.union(v.literal("checkout"), v.literal("terminal")),
+    channel: v.literal("checkout"), // Tap to Pay is a later channel
     livemode: v.boolean(),
     status: v.union(
       v.literal("creating"),

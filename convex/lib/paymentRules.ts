@@ -125,7 +125,6 @@ export type PaymentSnapshot = {
   currency: string;
   livemode: boolean;
   metadataTipPaymentId?: string;
-  paymentMethodTypes: string[];
   chargeId?: string;
   paidAt?: number;
   stripeFeeCents?: number;
@@ -136,7 +135,7 @@ export type PaymentSnapshot = {
 
 // Anything here means the money doesn't match what we asked Stripe to collect. Never pay out on it.
 export function snapshotProblems(
-  tip: { _id: string; chargedCents: number; livemode: boolean; channel: "checkout" | "terminal"; stripePaymentIntentId?: string },
+  tip: { _id: string; chargedCents: number; livemode: boolean; stripePaymentIntentId?: string },
   s: PaymentSnapshot,
 ): string[] {
   const problems: string[] = [];
@@ -145,7 +144,6 @@ export function snapshotProblems(
   if (s.currency !== "usd") problems.push(`currency ${s.currency}`);
   if (s.livemode !== tip.livemode) problems.push("test and live don't match");
   if (tip.stripePaymentIntentId && tip.stripePaymentIntentId !== s.paymentIntentId) problems.push("a different PaymentIntent is already recorded");
-  if (tip.channel === "terminal" && !s.paymentMethodTypes.includes("card_present")) problems.push("Tap to Pay payment isn't card_present");
   return problems;
 }
 

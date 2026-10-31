@@ -207,7 +207,7 @@ export const createGuestCheckout = action({
   handler: async (ctx, { handle, tipCents, coverFees, clientRequestId }): Promise<{ url: string }> => {
     const target = await ctx.runQuery(internal.payments.guestTarget, { handle });
     if (!target) throw new ConvexError("We couldn't find that person.");
-    const r = await ctx.runMutation(internal.payments.reservePayment, { workerId: target.workerId, channel: "checkout", tipCents, coverFees, clientRequestId });
+    const r = await ctx.runMutation(internal.payments.reservePayment, { workerId: target.workerId, tipCents, coverFees, clientRequestId });
     if (r.repeat) {
       if (r.checkoutUrl && r.status === "open") return { url: r.checkoutUrl };
       if (r.status !== "creating") throw new ConvexError("This tip has already been handled. Reload to tip again.");
@@ -246,81 +246,6 @@ export const refreshGuestReceipt = action({
   },
 });
 
-// Tap to Pay
-
-async function requireTapToPay(ctx: ActionCtx) {
-  const found = await workerFor(ctx);
-  if (found.stage !== "ready" || !found.payee) throw new ConvexError("Finish setting up payouts before taking Tap to Pay tips.");
-  const locationId = process.env.TERMINAL_LOCATION_ID;
-  if (!locationId) throw new ConvexError("Tap to Pay isn't turned on yet.");
-  return { ...found, locationId };
-}
-
-// This secret lets a phone take payments on the platform's account, so it's only for workers who can.
-export const terminalConnectionToken = action({
-  args: {},
-  handler: async (ctx): Promise<{ secret: string }> => {
-    const { locationId } = await requireTapToPay(ctx);
-    const token = await stripe().terminal.connectionTokens.create({ location: locationId });
-    return { secret: token.secret };
-  },
-});
-
-export const createTapPayment = action({
-  args: { tipCents: v.number(), coverFees: v.boolean(), clientRequestId: v.string() },
-  handler: async (ctx, { tipCents, coverFees, clientRequestId }): Promise<{ tipPaymentId: Id<"tipPayments">; clientSecret: string; chargedCents: number }> => {
-    const { worker } = await requireTapToPay(ctx);
-    const r = await ctx.runMutation(internal.payments.reservePayment, { workerId: worker._id, channel: "terminal", tipCents, coverFees, clientRequestId });
-    const s = stripe();
-    if (r.repeat && r.paymentIntentId) {
-      const existing = await s.paymentIntents.retrieve(r.paymentIntentId);
-      if (!existing.client_secret) throw new ConvexError("Start a new tip.");
-      return { tipPaymentId: r.tipPaymentId, clientSecret: existing.client_secret, chargedCents: r.chargedCents };
-    }
-    await confirmReceivable(ctx, r.tipPaymentId, r.stripeAccountId, r.needsAccountCheck);
-    const intent = await s.paymentIntents.create(
-      {
-        amount: r.chargedCents,
-        currency: "usd",
-        allowed_payment_method_types: ["card_present"],
-        capture_method: "automatic",
-        description: `Tip for ${worker.name.split(" ")[0]}`,
-        transfer_group: `tip_${r.tipPaymentId}`,
-        metadata: { tipPaymentId: r.tipPaymentId },
-      },
-      { idempotencyKey: `tap:${r.tipPaymentId}` },
-    );
-    await ctx.runMutation(internal.payments.attachIntent, { tipPaymentId: r.tipPaymentId, paymentIntentId: intent.id });
-    if (!intent.client_secret) throw new ConvexError("Couldn't start the payment. Try again.");
-    return { tipPaymentId: r.tipPaymentId, clientSecret: intent.client_secret, chargedCents: r.chargedCents };
-  },
-});
-
-// The app says it finished. Only Stripe's answer counts, and it comes back through the normal sync.
-export const syncTap = action({
-  args: { tipPaymentId: v.id("tipPayments") },
-  handler: async (ctx, { tipPaymentId }): Promise<{ status: Doc<"tipPayments">["status"]; netCents: number; chargedCents: number; crew: boolean }> => {
-    const { worker } = await workerFor(ctx);
-    const tip = await ctx.runQuery(internal.payments.getTip, { tipPaymentId });
-    if (!tip || tip.workerId !== worker._id) throw new ConvexError("We couldn't find that tip.");
-    await syncPayment(ctx, { tipPaymentId: tip._id });
-    const after: Doc<"tipPayments"> | null = await ctx.runQuery(internal.payments.getTip, { tipPaymentId });
-    return { status: after!.status, netCents: after!.netCents, chargedCents: after!.chargedCents, crew: after!.crewId !== undefined };
-  },
-});
-
-export const cancelTap = action({
-  args: { tipPaymentId: v.id("tipPayments") },
-  handler: async (ctx, { tipPaymentId }) => {
-    const { worker } = await workerFor(ctx);
-    const tip = await ctx.runQuery(internal.payments.getTip, { tipPaymentId });
-    if (!tip || tip.workerId !== worker._id || !tip.stripePaymentIntentId) return;
-    if (tip.status === "succeeded") return;
-    await stripe().paymentIntents.cancel(tip.stripePaymentIntentId);
-    await syncPayment(ctx, { tipPaymentId: tip._id });
-  },
-});
-
 // Reading the truth back from Stripe
 
 async function buildSnapshot(paymentIntentId: string, fetchedFrom: number): Promise<PaymentSnapshot> {
@@ -329,7 +254,7 @@ async function buildSnapshot(paymentIntentId: string, fetchedFrom: number): Prom
   const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge : null;
   const txn = charge?.balance_transaction && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
   const disputes = charge ? await s.disputes.list({ charge: charge.id, limit: 10 }) : { data: [] };
-  const details = charge?.payment_method_details as { card?: { brand?: string | null }; card_present?: { brand?: string | null } } | null | undefined;
+  const details = charge?.payment_method_details as { card?: { brand?: string | null } } | null | undefined;
   return {
     fetchedFrom,
     paymentIntentId: pi.id,
@@ -338,12 +263,11 @@ async function buildSnapshot(paymentIntentId: string, fetchedFrom: number): Prom
     currency: pi.currency,
     livemode: pi.livemode,
     metadataTipPaymentId: pi.metadata?.tipPaymentId,
-    paymentMethodTypes: [...(pi.allowed_payment_method_types ?? []), ...pi.payment_method_types],
     chargeId: charge?.id,
     paidAt: charge ? charge.created * 1000 : undefined,
     stripeFeeCents: txn?.fee ?? undefined,
     refundedCents: charge?.amount_refunded ?? 0,
-    cardBrand: details?.card?.brand ?? details?.card_present?.brand ?? undefined,
+    cardBrand: details?.card?.brand ?? undefined,
     disputes: disputes.data.map((d) => ({
       id: d.id,
       status: d.status,
@@ -362,7 +286,7 @@ async function syncPayment(ctx: ActionCtx, a: { tipPaymentId?: string; paymentIn
 
   let paymentIntentId = tip.stripePaymentIntentId ?? a.paymentIntentId;
   const sessionId = tip.stripeCheckoutSessionId ?? a.sessionId;
-  if (tip.channel === "checkout" && sessionId && !tip.stripePaymentIntentId) {
+  if (sessionId && !tip.stripePaymentIntentId) {
     const session = await stripe().checkout.sessions.retrieve(sessionId);
     if (session.metadata?.tipPaymentId !== tip._id) {
       await ctx.runMutation(internal.payments.alert, { kind: "payment_mismatch", severity: "critical", message: `Session ${session.id} doesn't belong to payment ${tip._id}.`, ref: session.id });

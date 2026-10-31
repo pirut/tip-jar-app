@@ -15,9 +15,10 @@ type Props = {
   onCancel?: () => void;
   onSignOut: () => void;
   onDelete?: () => Promise<void>;
+  keepsRecords?: boolean;
 };
 
-export function ProfileForm({ initial, email, onDone, onCancel, onSignOut, onDelete }: Props) {
+export function ProfileForm({ initial, email, onDone, onCancel, onSignOut, onDelete, keepsRecords }: Props) {
   const save = useMutation(api.workers.saveProfile);
   const [linkHost, setLinkHost] = useState("tip.jrbussard.com");
   useEffect(() => { setLinkHost(window.location.host); }, []);
@@ -76,7 +77,7 @@ export function ProfileForm({ initial, email, onDone, onCancel, onSignOut, onDel
           </div>
           <div id="handle-note">
             {handleProblem && <p className="error small">{handleProblem}</p>}
-            {!handleProblem && handleChanged && <p className="warn-text">Changing your link breaks any QR codes you&apos;ve already printed.</p>}
+            {!handleProblem && handleChanged && <p className="small muted">QR codes you&apos;ve already printed keep working and still pay you.</p>}
           </div>
         </div>
         <div className="field"><label htmlFor="job">Job</label><input className="input" id="job" maxLength={60} value={p.jobTitle} onChange={set("jobTitle")} placeholder="Valet, cart attendant…" /></div>
@@ -102,7 +103,9 @@ export function ProfileForm({ initial, email, onDone, onCancel, onSignOut, onDel
             <section className="section-line stack-lg">
               <h2 className="t-sub">Delete account</h2>
               <div className="row between wrap">
-                <span className="muted grow" style={{ minWidth: 200 }}>Removes your profile, tips and cash-out history. You can delete once any crew you belong to has closed.</span>
+                <span className="muted grow" style={{ minWidth: 200 }}>{keepsRecords
+                  ? "Removes your profile. You can delete once your crews have closed and your Stripe balance has paid out. Records of real tips and payouts are kept, as the law and our books require."
+                  : "Removes your profile, tips and cash-out history. You can delete once any crew you belong to has closed."}</span>
                 <button type="button" className="btn" onClick={() => setConfirmDelete(true)}>Delete account</button>
               </div>
               {deleteError && <p className="error" role="alert">{deleteError}</p>}

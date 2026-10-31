@@ -69,7 +69,7 @@ export const tipFromGuest = mutation({
   },
 });
 
-// Tap to Pay on the worker's own phone. Simulated until Stripe Terminal is connected.
+// A simulated tap for demo accounts. Real Tap to Pay is coming later.
 export const recordTap = mutation({
   args: { amountCents: v.number(), coverFees: v.boolean() },
   handler: async (ctx, { amountCents, coverFees }) => {
@@ -104,7 +104,7 @@ export const today = query({
           _id: p._id as string,
           at: p.paidAt ?? p._creationTime,
           netCents: entitlement(p).entitledCents,
-          source: p.channel === "terminal" ? ("tap" as const) : ("qr" as const),
+          source: "qr" as const,
           payerLabel: p.cardBrand ? p.cardBrand[0].toUpperCase() + p.cardBrand.slice(1) : "Guest tip",
           toCrew: p.crewId !== undefined,
           demo: false,
