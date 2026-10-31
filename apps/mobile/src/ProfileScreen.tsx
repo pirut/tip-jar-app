@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { View } from "react-native";
+import { useEffect, useState } from "react";
+import { BackHandler, View } from "react-native";
 import { useMutation, useQuery } from "convex/react";
 import { useAuth, useUser } from "@clerk/expo";
 import { api } from "../../../convex/_generated/api";
@@ -30,6 +30,12 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
   // Tip Jar's data is gone but the Clerk sign-in isn't. Retrying must skip the data step, which would now fail.
   const [partlyDeleted, setPartlyDeleted] = useState(false);
   const [signOutError, setSignOutError] = useState("");
+  // Keep Android Back from hiding an in-flight result or deletion recovery.
+  useEffect(() => {
+    if (!deleting && !saving) return;
+    const back = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => back.remove();
+  }, [deleting, saving]);
   const ready = !!p.name.trim() && p.handle.length >= 3;
   const crewBlock = crew?.crew
     ? (crew.crew.iAmStarter ? "You started an open crew. Close it before deleting your account." : "You're in a crew. Leave it, and wait for it to close, before deleting your account.")
@@ -70,7 +76,8 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
     }
     if (!dataAlreadyGone) setPartlyDeleted(true);
     try {
-      await user?.delete();
+      if (!user) throw new Error("Sign in again to finish deleting your account.");
+      await user.delete();
     } catch {
       setDeleting(false);
       setDeleteError("We couldn't remove your sign-in account. Check your connection and try again.");

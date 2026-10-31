@@ -14,7 +14,7 @@ export function AuthScreen() {
     setBusy(true);
     try {
       // Closing the browser sheet is a normal way out, so only a Clerk that isn't ready gets a message.
-      const { authSessionResult } = await startHostedAuth({ mode });
+      const { authSessionResult } = await startHostedAuth({ mode, authSessionOptions: { preferEphemeralSession: true } });
       if (!authSessionResult) setError("Still getting ready. Try again in a moment.");
     } catch {
       setError("Couldn't sign you in. Check your connection and try again.");

@@ -280,11 +280,11 @@ function InCrew({ crew }: { crew: CrewData }) {
             <Body>Close the crew and pay everyone their share now? This can't be undone.</Body>
             {crew.evenFallback && <Body small>{split === "hours" ? "Hours are still at zero" : "All weights are zero"}, so the pool will split evenly.</Body>}
             <ErrorText>{finish.error}</ErrorText>
-            <Btn kind="primary" title={finish.busy ? "Closing…" : "Close and split (demo)"} disabled={finish.busy} onPress={() => finish.run(() => close({}))} />
+            <Btn kind="primary" title={finish.busy ? "Closing…" : "Close and split (demo)"} disabled={finish.busy || edit.busy} onPress={() => finish.run(() => close({}))} />
             <Btn kind="ghost" title="Keep crew open" disabled={finish.busy} onPress={() => { setConfirming(null); finish.setError(""); }} />
           </Banner>
         ) : (
-          <Btn kind="primary" title="Close crew and split now" disabled={!crew.splitValid} onPress={() => setConfirming("close")} />
+          <Btn kind="primary" title="Close crew and split now" disabled={!crew.splitValid || edit.busy} onPress={() => { Keyboard.dismiss(); setConfirming("close"); }} />
         )
       ) : confirming === "leave" ? (
         <Banner>
