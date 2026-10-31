@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { activeMembership, currentWorker, requireWorker } from "./helpers";
+import { internal } from "./_generated/api";
+import { JOIN_WINDOW_MS, activeMembership, currentWorker, joinAttemptsFor, requireWorker, unsettledCrew } from "./helpers";
 import { handleError } from "./lib/handles";
 
 export const me = query({
@@ -72,15 +73,31 @@ export const deleteAccount = mutation({
   args: {},
   handler: async (ctx) => {
     const worker = await requireWorker(ctx);
-    if (await activeMembership(ctx, worker._id)) {
-      throw new ConvexError("Leave or close your crew before deleting your account.");
+    // An open crew's pool is made of its members' tips, so they have to stay until it closes.
+    const crew = await unsettledCrew(ctx, worker._id);
+    if (crew) {
+      throw new ConvexError(
+        crew.starterId === worker._id
+          ? "Close your crew before deleting your account."
+          : `${crew.name} is still open and your share isn't settled yet. You can delete your account once it closes, within 24 hours.`,
+      );
     }
     for (const table of ["tips", "cashouts"] as const) {
       const rows = await ctx.db.query(table).withIndex("by_worker", (q) => q.eq("workerId", worker._id)).collect();
       for (const row of rows) await ctx.db.delete(row._id);
     }
-    const attempts = await ctx.db.query("joinAttempts").withIndex("by_worker", (q) => q.eq("workerId", worker._id)).unique();
-    if (attempts) await ctx.db.delete(attempts._id);
+    // A running count stays until its window ends, or recreating a profile would reset the
+    // limit. The cleanup goes by row id so the identity doesn't sit in the scheduler log.
+    const attempts = await joinAttemptsFor(ctx, worker);
+    if (attempts) {
+      const windowEnd = attempts.windowStart + JOIN_WINDOW_MS;
+      if (Date.now() >= windowEnd) {
+        await ctx.db.delete(attempts._id);
+      } else {
+        await ctx.db.patch(attempts._id, { tokenIdentifier: worker.tokenIdentifier, workerId: undefined });
+        await ctx.scheduler.runAt(windowEnd, internal.crews.purgeJoinAttempts, { id: attempts._id });
+      }
+    }
     await ctx.db.delete(worker._id);
   },
 });
