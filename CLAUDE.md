@@ -15,7 +15,7 @@ npm workspaces: run `npm install` at the repo root only.
 - All money is integer cents. Fees: `feesCents()` in `convex/lib/money.ts` (card estimate + 25¢ platform fee). Guests cover fees by default.
 - Crews: only the starter changes the split; tips received before joining stay with the worker; leftover cents rotate.
 - Crew payouts cover everyone who was in the crew, including people who left; only members the starter removed are excluded (their own tips go back to them). Weights that add to nothing pay evenly so a pool is never lost.
-- Wrong crew codes are limited per worker. Mutations that count a failure must return an error rather than throw, because a throw rolls the count back.
+- Wrong crew codes are limited per signed-in identity, including across profile recreation. Mutations that count a failure must return an error rather than throw, because a throw rolls the count back.
 - Guests never load Clerk: it is only mounted under `/app`, and `proxy.ts` only matches `/app`.
 - Payments and Tap to Pay are simulated (`demo: true` on records, "Demo" tags in UI) until Stripe Connect / Stripe Terminal are wired in. Never present demo money as real.
 - US only. Tips only for companies for now (no wages).

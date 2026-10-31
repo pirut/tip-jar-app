@@ -38,7 +38,12 @@ export const summary = query({
       if (d) d.cents += cents;
     };
     for (const t of l.tips) if (t.crewId === undefined) add(t._creationTime, t.netCents);
-    for (const m of l.memberships) if (m.payoutCents !== undefined && m.leftAt) add(m.leftAt, m.payoutCents);
+    // Crews stay open 24 hours at most, so anyone who left before that can't land on the chart.
+    const paid = l.memberships.filter((m) => m.payoutCents !== undefined && m.leftAt !== undefined && m.leftAt >= days[0].start - DAY);
+    for (const m of paid) {
+      const crew = await ctx.db.get(m.crewId);
+      add(crew?.closedAt ?? m.leftAt!, m.payoutCents!);
+    }
     return {
       balanceCents: l.balanceCents,
       pendingCrewCents: l.pendingCrewCents,

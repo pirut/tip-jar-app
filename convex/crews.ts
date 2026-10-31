@@ -3,12 +3,12 @@ import { internalMutation, mutation, query, type MutationCtx } from "./_generate
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { splitMode } from "./schema";
-import { activeMembership, currentWorker, requireWorker } from "./helpers";
+import { JOIN_WINDOW_MS, activeMembership, currentWorker, joinAttemptsFor, requireWorker, unsettledCrew } from "./helpers";
 import { customPercentsValid, effectiveWeights, splitCents, weightsFor, type SplitMember } from "./lib/split";
 
 const HOUR = 60 * 60 * 1000;
 const JOIN_FAILS_ALLOWED = 5;
-const JOIN_WINDOW_MS = 10 * 60 * 1000;
+const CREW_NAME_MAX = 60;
 
 function memberHours(m: Doc<"crewMembers">, now: number): number {
   if (m.hoursOverride !== undefined) return m.hoursOverride;
@@ -48,16 +48,8 @@ export const current = query({
     const membership = await activeMembership(ctx, worker._id);
     if (!membership) {
       // Someone who stepped out of a crew that's still open is owed a share when it closes.
-      const recent = await ctx.db
-        .query("crewMembers")
-        .withIndex("by_worker", (q) => q.eq("workerId", worker._id))
-        .order("desc")
-        .take(5);
-      for (const m of recent) {
-        if (m.removedAt !== undefined) continue;
-        const open = await ctx.db.get(m.crewId);
-        if (open?.status === "open") return { crew: null, leftCrew: { name: open.name, closesAt: open.closesAt } };
-      }
+      const open = await unsettledCrew(ctx, worker._id);
+      if (open) return { crew: null, leftCrew: { name: open.name, closesAt: open.closesAt } };
       return { crew: null };
     }
     const { crew } = membership;
@@ -146,10 +138,11 @@ export const start = mutation({
     const worker = await requireWorker(ctx);
     if (await activeMembership(ctx, worker._id)) throw new ConvexError("Leave your current crew first.");
     if (!(closesInHours > 0 && closesInHours <= 24)) throw new ConvexError("A crew can stay open up to 24 hours.");
+    if (name.trim().length > CREW_NAME_MAX) throw new ConvexError("That crew name is a bit long. Please shorten it.");
     const now = Date.now();
     const closesAt = now + closesInHours * HOUR;
     const crewId = await ctx.db.insert("crews", {
-      name: name.trim() || `${worker.workplace || worker.name}'s crew`,
+      name: name.trim() || `${(worker.workplace || worker.name).slice(0, CREW_NAME_MAX - 7)}'s crew`,
       code: await newCode(ctx),
       starterId: worker._id,
       splitMode,
@@ -166,9 +159,9 @@ type CodeLookup = { ok: true; crew: Doc<"crews"> } | { ok: false; error: string 
 
 // Mutations that throw roll back their writes, so a wrong code returns an error
 // instead of throwing. Otherwise the failed guess wouldn't be counted.
-async function findCrewByCode(ctx: MutationCtx, workerId: Id<"workers">, code: string): Promise<CodeLookup> {
+async function findCrewByCode(ctx: MutationCtx, worker: Doc<"workers">, code: string): Promise<CodeLookup> {
   const now = Date.now();
-  const attempts = await ctx.db.query("joinAttempts").withIndex("by_worker", (q) => q.eq("workerId", workerId)).unique();
+  const attempts = await joinAttemptsFor(ctx, worker);
   const inWindow = attempts !== null && now - attempts.windowStart < JOIN_WINDOW_MS;
   if (inWindow && attempts.fails >= JOIN_FAILS_ALLOWED) {
     return { ok: false, error: "Too many wrong codes. Wait 10 minutes and try again." };
@@ -178,17 +171,28 @@ async function findCrewByCode(ctx: MutationCtx, workerId: Id<"workers">, code: s
     .withIndex("by_code_status", (q) => q.eq("code", code.trim()).eq("status", "open"))
     .first();
   if (crew) return { ok: true, crew };
-  if (attempts) await ctx.db.patch(attempts._id, inWindow ? { fails: attempts.fails + 1 } : { windowStart: now, fails: 1 });
-  else await ctx.db.insert("joinAttempts", { workerId, windowStart: now, fails: 1 });
+  const { tokenIdentifier } = worker;
+  const count = inWindow ? { fails: attempts.fails + 1 } : { windowStart: now, fails: 1 };
+  if (attempts) await ctx.db.patch(attempts._id, { tokenIdentifier, workerId: undefined, ...count });
+  else await ctx.db.insert("joinAttempts", { tokenIdentifier, windowStart: now, fails: 1 });
   return { ok: false, error: "No open crew has that code." };
 }
+
+// Scheduled when an account is deleted mid-window. A window that has ended counts for nothing.
+export const purgeJoinAttempts = internalMutation({
+  args: { id: v.id("joinAttempts") },
+  handler: async (ctx, { id }: { id: Id<"joinAttempts"> }) => {
+    const attempts = await ctx.db.get(id);
+    if (attempts && Date.now() - attempts.windowStart >= JOIN_WINDOW_MS) await ctx.db.delete(id);
+  },
+});
 
 // Shows what you'd be joining, so people see the split before they commit.
 export const lookup = mutation({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
     const worker = await requireWorker(ctx);
-    const found = await findCrewByCode(ctx, worker._id, code);
+    const found = await findCrewByCode(ctx, worker, code);
     if (!found.ok) return found;
     const { crew } = found;
     const starter = await ctx.db.get(crew.starterId);
@@ -211,7 +215,7 @@ export const join = mutation({
   handler: async (ctx, { code }) => {
     const worker = await requireWorker(ctx);
     if (await activeMembership(ctx, worker._id)) return { ok: false as const, error: "You're already in a crew." };
-    const found = await findCrewByCode(ctx, worker._id, code);
+    const found = await findCrewByCode(ctx, worker, code);
     if (!found.ok) return found;
     const { crew } = found;
     const now = Date.now();

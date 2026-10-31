@@ -65,12 +65,16 @@ export default defineSchema({
     .index("by_crew", ["crewId"])
     .index("by_worker", ["workerId"]),
 
-  // Wrong crew codes per worker. Codes are only 4 digits, so guesses have to be limited.
+  // Wrong crew codes per signed-in identity. Codes are only 4 digits, so guesses have to be
+  // limited, and a count has to outlast the worker or recreating a profile would reset it.
   joinAttempts: defineTable({
-    workerId: v.id("workers"),
+    tokenIdentifier: v.optional(v.string()), // required once convex/migrations.ts has run
+    workerId: v.optional(v.id("workers")), // the old key: goes away once convex/migrations.ts has run
     windowStart: v.number(),
     fails: v.number(),
-  }).index("by_worker", ["workerId"]),
+  })
+    .index("by_token", ["tokenIdentifier"])
+    .index("by_worker", ["workerId"]),
 
   cashouts: defineTable({
     workerId: v.id("workers"),
