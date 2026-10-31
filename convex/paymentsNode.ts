@@ -43,8 +43,10 @@ async function workerFor(ctx: ActionCtx) {
 
 // Set up payouts
 
-// Accounts v2 by default. STRIPE_CONNECT_API=v1 is for a platform where Stripe hasn't switched v2 on
-// yet: the same recipient setup, written as v1 controller properties.
+// Accounts v2 by default. STRIPE_CONNECT_API=v1 is for a sandbox where Accounts v2 hasn't been switched
+// on in the Dashboard: the same recipient setup, written as v1 controller properties. Stripe stopped
+// accepting that on API versions after this one, so it can't be the route for new live accounts.
+const V1_ACCOUNTS_API_VERSION = "2026-07-29.dahlia";
 const useV1Accounts = () => process.env.STRIPE_CONNECT_API === "v1";
 
 async function readAccountStatus(stripeAccountId: string) {
@@ -59,7 +61,7 @@ async function syncAccount(ctx: ActionCtx, stripeAccountId: string) {
 }
 
 async function createRecipient(worker: Doc<"workers">, email: string | undefined) {
-  const options = { idempotencyKey: `account:${worker._id}` };
+  const idempotencyKey = `account:${worker._id}`;
   if (useV1Accounts()) {
     const account = await stripe().accounts.create(
       {
@@ -76,7 +78,7 @@ async function createRecipient(worker: Doc<"workers">, email: string | undefined
         capabilities: { transfers: { requested: true } },
         metadata: { tipJarWorkerId: worker._id },
       },
-      options,
+      { idempotencyKey, apiVersion: V1_ACCOUNTS_API_VERSION },
     );
     return { id: account.id, status: accountStatusV1(account) };
   }
@@ -91,7 +93,7 @@ async function createRecipient(worker: Doc<"workers">, email: string | undefined
       include: ["configuration.recipient", "requirements"],
       metadata: { tipJarWorkerId: worker._id },
     },
-    options,
+    { idempotencyKey },
   );
   return { id: account.id, status: accountStatus(account) };
 }

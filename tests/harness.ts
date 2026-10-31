@@ -8,7 +8,7 @@ import { registerHooks } from "node:module";
 // convex/ uses extensionless relative imports, which Node doesn't resolve by itself.
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith(".") && context.parentURL && !/\.[cm]?[jt]s$/.test(specifier)) {
+    if (specifier.startsWith(".") && context.parentURL && !context.parentURL.includes("/node_modules/") && !/\.[cm]?[jt]s$/.test(specifier)) {
       for (const ext of [".ts", ".js"]) {
         const url = new URL(specifier + ext, context.parentURL);
         if (existsSync(url)) return nextResolve(url.href, context);
@@ -194,11 +194,12 @@ class Db {
   }
 }
 
-export function world() {
+// `realClock` is for scripts/sandbox-e2e.ts, where Stripe has to agree on the time.
+export function world({ realClock = false } = {}) {
   const db = new Db();
   let now = START;
   let jobs: { at: number; name: string; args: any }[] = [];
-  Date.now = () => now;
+  if (!realClock) Date.now = () => now;
 
   const resolve = (ref: any) => {
     const [file, name] = getFunctionName(ref).split(":");
@@ -209,7 +210,7 @@ export function world() {
     auth: { getUserIdentity: async () => (token ? { tokenIdentifier: token, email: `${token}@example.com` } : null) },
     scheduler: {
       runAt: async (at: number, ref: any, args: any) => { jobs.push({ at, name: getFunctionName(ref), args }); },
-      runAfter: async (ms: number, ref: any, args: any) => { jobs.push({ at: now + ms, name: getFunctionName(ref), args }); },
+      runAfter: async (ms: number, ref: any, args: any) => { jobs.push({ at: Date.now() + ms, name: getFunctionName(ref), args }); },
     },
     // Actions: each nested call is its own transaction, as it is on Convex.
     runQuery: (ref: any, args: any) => call(resolve(ref), token, args),
@@ -232,7 +233,7 @@ export function world() {
 
   const runDueJobs = async () => {
     for (;;) {
-      const due = jobs.filter((j) => j.at <= now).sort((a, b) => a.at - b.at)[0];
+      const due = jobs.filter((j) => j.at <= Date.now()).sort((a, b) => a.at - b.at)[0];
       if (!due) return;
       jobs = jobs.filter((j) => j !== due);
       const [file, name] = due.name.split(":");
