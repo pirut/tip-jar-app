@@ -3,10 +3,11 @@
 Tipping app for service workers (valets, golf cart attendants). Guests tip by QR code or Tap to Pay on the worker's phone; workers can pool tips in a day "crew"; companies (later) run pools and tip payouts. Product decisions and roadmap: PLAN.md (section 7 lists decisions already made; don't re-ask them).
 
 ## Layout
-- `convex/`: backend (Convex). Schema in `convex/schema.ts`, auth via Clerk (`convex/auth.config.ts`, workers keyed by `tokenIdentifier`), money helpers in `convex/lib/money.ts`, split math in `convex/lib/split.ts`. `convex/_generated` is committed; regenerate with `npx convex dev` after schema/function changes.
+- `convex/`: backend (Convex). Schema in `convex/schema.ts`, auth via Clerk (`convex/auth.config.ts`, workers keyed by `tokenIdentifier`), money helpers in `convex/lib/money.ts`, split math in `convex/lib/split.ts`. Real payments: `convex/paymentsNode.ts` (every Stripe call), `convex/payments.ts` (transactions), `convex/settlement.ts` (transfers), `convex/ops.ts` (operator controls), rules in `convex/lib/paymentRules.ts`. `convex/_generated` is committed; regenerate with `npx convex dev` after schema/function changes.
 - `apps/web`: Next.js (App Router) on Vercel at tip.jrbussard.com. `/<handle>` is the public guest tip page, `/app` is the worker dashboard. Imports backend code via the `@convex/*` path alias.
 - `apps/mobile`: Expo app (SDK 58) for workers, single `App.tsx` + `src/`. Imports backend code by relative path (`../../convex/...`). Install native deps with `npx expo install`.
-- `tests/`: node:test unit tests (`npm test`).
+- `tests/`: node:test unit tests (`npm test`), with a fake Stripe. `scripts/sandbox-e2e.ts` runs the same logic against the real Stripe sandbox (`npm run test:sandbox`).
+- `docs/payments-architecture.md`: the money model. `docs/pilot-runbook.md`: setup and operations.
 - `mockup/`: the original clickable prototype (static HTML), kept for reference.
 
 npm workspaces: run `npm install` at the repo root only.
@@ -17,7 +18,11 @@ npm workspaces: run `npm install` at the repo root only.
 - Crew payouts cover everyone who was in the crew, including people who left; only members the starter removed are excluded (their own tips go back to them). Weights that add to nothing pay evenly so a pool is never lost.
 - Wrong crew codes are limited per signed-in identity, including across profile recreation. Mutations that count a failure must return an error rather than throw, because a throw rolls the count back.
 - Guests never load Clerk: it is only mounted under `/app`, and `proxy.ts` only matches `/app`.
-- Payments and Tap to Pay are simulated (`demo: true` on records, "Demo" tags in UI) until Stripe Connect / Stripe Terminal are wired in. Never present demo money as real.
+- Real money runs only for enrolled workers, behind the checks in `docs/payments-architecture.md`. Everyone else stays in demo (`tips` table, `demo: true`, "Demo" tags). Sandbox money shows "Test". Never present demo or test money as real, and never add them to real balances.
+- No public mutation may write real-money tables, and earnings only come from `applyPaymentSnapshot` after re-reading Stripe. `tests/payments.test.ts` pins the list of public mutations.
+- Separate charges and transfers for solo and crew alike. Worker money and platform revenue share one Stripe balance, so only the ledger separates them.
+- Link names (`handleClaims`) stay with their sign-in identity for good, so a printed QR code never starts paying someone else.
+- QR tips only for now. Tap to Pay is deferred: no Terminal SDK, and it needs an organization Apple account.
 - US only. Tips only for companies for now (no wages).
 
 ## Commands
@@ -25,7 +30,8 @@ npm workspaces: run `npm install` at the repo root only.
 npx convex dev                       # dev backend, writes .env.local (gitignored)
 npm run dev -w apps/web              # needs apps/web/.env.local with NEXT_PUBLIC_CONVEX_URL, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY
 EXPO_PUBLIC_CONVEX_URL=... EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=... npm start -w apps/mobile
-npm test                             # split math
+npm test                             # split math, crews and real-money rules (Stripe mocked)
+npm run test:sandbox                 # real Stripe sandbox, via the CLI's login; set PLAYWRIGHT_PATH
 npm run typecheck                    # convex + web + mobile
 npx convex deploy                    # prod backend
 npx convex env set [--prod] CLERK_JWT_ISSUER_DOMAIN <clerk frontend api url>   # once per deployment

@@ -3,7 +3,7 @@ const HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/;
 
 // Names used by app routes today, or planned ones in PLAN.md (/company).
 const RESERVED = new Set([
-  "about", "admin", "api", "app", "billing", "company", "help", "legal", "login", "logout",
+  "about", "admin", "api", "app", "billing", "company", "help", "legal", "login", "logout", "payouts",
   "privacy", "register", "settings", "signin", "signout", "signup", "sign-in", "sign-out",
   "sign-up", "support", "terms", "tip", "tips", "www",
 ]);

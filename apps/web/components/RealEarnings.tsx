@@ -47,7 +47,7 @@ export function PayoutSetupCard({ stage }: { stage: string }) {
   }
 
   return (
-    <section className="notice stack" style={{ gap: 8 }}>
+    <section className="notice stack" style={{ gap: 8, textAlign: "left" }}>
       <h2 className="t-sub">{text.title}</h2>
       <p className="small">{text.body}</p>
       {error && <p className="error" role="alert">{error}</p>}
@@ -90,6 +90,9 @@ export function RealEarnings() {
   const weekCents = r.week.reduce((a, d) => a + d.cents, 0);
   const chartLabel = r.week.map((d) => `${dayName(d.start, "long")} ${money2(d.cents)}`).join(", ");
 
+  // Nothing to show until there's a Stripe account, and a dash for a balance would only confuse.
+  if (r.stage === "setup") return <div style={{ maxWidth: 640 }}><PayoutSetupCard stage={r.stage} /></div>;
+
   return (
     <div className="stack-lg" style={{ gap: 24, maxWidth: 640 }}>
       <PayoutSetupCard stage={r.stage} />
@@ -99,12 +102,12 @@ export function RealEarnings() {
           <div className="amount">{r.availableCents === null ? "—" : money2(r.availableCents)}</div>
           <p className="small muted">{r.payoutsPaused ? "Payouts are on hold." : "Pays out to your bank every Monday."}</p>
         </div>
-        {r.stage !== "setup" && <button className="btn" disabled={opening} onClick={openDashboard}>{opening ? <><span className="spinner" aria-hidden />Opening…</> : "Bank and tax details"}</button>}
+        <button className="btn" disabled={opening} onClick={openDashboard}>{opening ? <><span className="spinner" aria-hidden />Opening…</> : "Bank and tax details"}</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
 
       <div className="rows">
-        <div className="line"><span>Reaching Stripe's available balance soon</span><span>{r.stripePendingCents === null ? "—" : money2(r.stripePendingCents)}</span></div>
+        {r.stripePendingCents !== null && <div className="line"><span>On its way to available</span><span>{money2(r.stripePendingCents)}</span></div>}
         <div className="line"><span>On hold with Tip Jar{r.nextTransferAt && r.onHoldCents > 0 ? `, next release ${shortDate(r.nextTransferAt)}` : ""}</span><span>{money2(r.onHoldCents)}</span></div>
         {r.crewPoolCents > 0 && <div className="line"><span>Your tips in today&apos;s crew pool. Your share comes when it closes</span><span>{money2(r.crewPoolCents)}</span></div>}
         {r.owedCents > 0 && <div className="line"><span>Owed back from a refund or dispute. Comes out of later tips</span><span>−{money2(r.owedCents)}</span></div>}

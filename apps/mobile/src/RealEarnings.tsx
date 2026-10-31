@@ -97,6 +97,9 @@ export function RealEarnings() {
     </Row>
   );
 
+  // Nothing to show until there's a Stripe account, and a dash for a balance would only confuse.
+  if (r.stage === "setup") return <PayoutSetupCard stage={r.stage} />;
+
   return (
     <View style={{ gap: 18 }}>
       <PayoutSetupCard stage={r.stage} />
@@ -106,14 +109,14 @@ export function RealEarnings() {
         <Body muted small>{r.payoutsPaused ? "Payouts are on hold." : "Pays out to your bank every Monday."}</Body>
       </View>
       <Card>
-        {line("Reaching Stripe's available balance soon", r.stripePendingCents === null ? "—" : money2(r.stripePendingCents))}
+        {r.stripePendingCents !== null && line("On its way to available", money2(r.stripePendingCents))}
         {line(`On hold with Tip Jar${r.nextTransferAt && r.onHoldCents > 0 ? `, next release ${dateTime(r.nextTransferAt)}` : ""}`, money2(r.onHoldCents))}
         {r.crewPoolCents > 0 && line("Your tips in today's crew pool. Your share comes when it closes", money2(r.crewPoolCents))}
         {r.owedCents > 0 && line("Owed back from a refund or dispute. Comes out of later tips", `−${money2(r.owedCents)}`)}
         {r.balanceSyncedAt !== null && <Body muted small>Stripe figures from {dateTime(r.balanceSyncedAt)}.</Body>}
       </Card>
       <ErrorText>{error}</ErrorText>
-      {r.stage !== "setup" && <Btn title={opening ? "Opening…" : "Bank and tax details"} disabled={opening} onPress={openDashboard} />}
+      <Btn title={opening ? "Opening…" : "Bank and tax details"} disabled={opening} onPress={openDashboard} />
       <Card>
         <Row style={{ justifyContent: "space-between" }}><Eyebrow>Last 7 days</Eyebrow><View style={{ flexShrink: 1 }}><Big size={30}>{money2(weekCents)}</Big></View></Row>
         {weekCents === 0 ? <Body muted small>Your week fills in as tips arrive.</Body> : (

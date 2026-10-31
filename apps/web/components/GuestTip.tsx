@@ -37,13 +37,14 @@ function GuestPaid({ sessionId, worker, onTipAgain }: { sessionId: string; worke
   const first = worker.name.split(" ")[0];
   const paid = receipt?.status === "succeeded";
   const settled = paid || receipt?.status === "failed" || receipt?.status === "expired" || receipt?.status === "canceled";
+  const unknown = receipt === null; // An address nobody made, or not one of ours.
   useEffect(() => {
-    if (settled) return;
+    if (settled || unknown) return;
     const check = () => { refresh({ sessionId }).catch(() => { /* The webhook will get there. */ }); };
     check();
     const id = setInterval(check, 4000);
     return () => clearInterval(id);
-  }, [settled, sessionId, refresh]);
+  }, [settled, unknown, sessionId, refresh]);
   return (
     <div className="center-page">
       {worker.testMode && <TestBar />}
@@ -51,8 +52,9 @@ function GuestPaid({ sessionId, worker, onTipAgain }: { sessionId: string; worke
         <Logo />
         <div className="stack-lg rise" style={{ marginBlock: "auto" }}>
           {paid && <div className="thanks-mark"><IconCheck size={26} /></div>}
-          <h1 className="t-title">{paid ? `Thanks for tipping ${first}` : settled ? "This tip didn't go through" : "Confirming your tip…"}</h1>
-          {!settled && <p className="muted">This usually takes a few seconds.</p>}
+          <h1 className="t-title">{paid ? `Thanks for tipping ${first}` : unknown ? "We can't find this tip" : settled ? "This tip didn't go through" : "Confirming your tip…"}</h1>
+          {unknown && <p className="muted">Check your card statement or email receipt to see if it went through.</p>}
+          {!settled && !unknown && <p className="muted">This usually takes a few seconds.</p>}
           {settled && !paid && <p className="muted">You weren&apos;t charged. You can try again.</p>}
           {paid && receipt && (
             <div className="rows" style={{ marginTop: 8 }}>
