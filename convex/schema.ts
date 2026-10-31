@@ -55,10 +55,25 @@ export default defineSchema({
     hoursOverride: v.optional(v.number()),
     shares: v.number(),
     pct: v.number(),
+    // Time from earlier stints, when someone leaves and rejoins the same crew.
+    priorMs: v.optional(v.number()),
+    // The starter took this person out of the crew. They aren't paid and can't rejoin.
+    removedAt: v.optional(v.number()),
     // Filled in when the crew closes.
     payoutCents: v.optional(v.number()),
   })
     .index("by_crew", ["crewId"])
+    .index("by_worker", ["workerId"]),
+
+  // Wrong crew codes per signed-in identity. Codes are only 4 digits, so guesses have to be
+  // limited, and a count has to outlast the worker or recreating a profile would reset it.
+  joinAttempts: defineTable({
+    tokenIdentifier: v.optional(v.string()), // required once convex/migrations.ts has run
+    workerId: v.optional(v.id("workers")), // the old key: goes away once convex/migrations.ts has run
+    windowStart: v.number(),
+    fails: v.number(),
+  })
+    .index("by_token", ["tokenIdentifier"])
     .index("by_worker", ["workerId"]),
 
   cashouts: defineTable({

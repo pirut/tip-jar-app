@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitCents, weightsFor } from "../convex/lib/split.ts";
+import { effectiveWeights, splitCents, weightsFor } from "../convex/lib/split.ts";
+import { handleError } from "../convex/lib/handles.ts";
 
 test("even split hands leftover cents out in rotating order", () => {
   assert.deepEqual(splitCents(1000, [1, 1, 1]), [334, 333, 333]);
@@ -26,4 +27,32 @@ test("zero-weight members never get leftover cents", () => {
 test("empty or zero weights give zeros", () => {
   assert.deepEqual(splitCents(500, [0, 0]), [0, 0]);
   assert.deepEqual(splitCents(500, []), []);
+});
+
+const m = (hours: number, shares: number, pct: number) => ({ hours, shares, pct });
+
+test("an hours crew closed early still pays the whole pool", () => {
+  const out = splitCents(4000, effectiveWeights("hours", [m(0, 1, 0), m(0, 1, 0)]));
+  assert.deepEqual(out, [2000, 2000]);
+});
+
+test("all-zero shares pay evenly rather than losing the pool", () => {
+  assert.deepEqual(splitCents(1000, effectiveWeights("shares", [m(1, 0, 0), m(1, 0, 0)])), [500, 500]);
+});
+
+test("percents that don't add to 100 pay evenly", () => {
+  assert.deepEqual(effectiveWeights("custom", [m(1, 1, 70), m(1, 1, 70)]), [1, 1]);
+});
+
+test("valid weights are left alone", () => {
+  assert.deepEqual(effectiveWeights("custom", [m(1, 1, 60), m(1, 1, 40)]), [60, 40]);
+  assert.deepEqual(effectiveWeights("hours", [m(8, 1, 0), m(0, 1, 0)]), [8, 0]);
+});
+
+test("link names", () => {
+  assert.equal(handleError("marcus-2"), null);
+  assert.match(handleError("company") ?? "", /reserved/);
+  assert.match(handleError("sign-in") ?? "", /reserved/);
+  assert.match(handleError("ab") ?? "", /3–30/);
+  assert.match(handleError("-abc") ?? "", /3–30/);
 });

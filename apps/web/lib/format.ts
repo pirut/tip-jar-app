@@ -23,3 +23,12 @@ export function errorText(e: unknown): string {
   if (typeof data === "string") return data;
   return "Something went wrong. Try again.";
 }
+
+// Where to land after signing in. Built from known params only, so a crafted URL can't redirect off-site.
+export function returnPath(search: string): string {
+  const params = new URLSearchParams(search);
+  const join = params.get("join");
+  if (join && /^\d{4}$/.test(join)) return `/app?join=${join}`;
+  const tab = params.get("tab");
+  return tab === "crew" || tab === "earn" ? `/app?tab=${tab}` : "/app";
+}

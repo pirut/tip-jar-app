@@ -14,6 +14,9 @@ npm workspaces: run `npm install` at the repo root only.
 ## Rules that matter
 - All money is integer cents. Fees: `feesCents()` in `convex/lib/money.ts` (card estimate + 25¢ platform fee). Guests cover fees by default.
 - Crews: only the starter changes the split; tips received before joining stay with the worker; leftover cents rotate.
+- Crew payouts cover everyone who was in the crew, including people who left; only members the starter removed are excluded (their own tips go back to them). Weights that add to nothing pay evenly so a pool is never lost.
+- Wrong crew codes are limited per signed-in identity, including across profile recreation. Mutations that count a failure must return an error rather than throw, because a throw rolls the count back.
+- Guests never load Clerk: it is only mounted under `/app`, and `proxy.ts` only matches `/app`.
 - Payments and Tap to Pay are simulated (`demo: true` on records, "Demo" tags in UI) until Stripe Connect / Stripe Terminal are wired in. Never present demo money as real.
 - US only. Tips only for companies for now (no wages).
 
@@ -30,5 +33,7 @@ npx convex env set [--prod] CLERK_JWT_ISSUER_DOMAIN <clerk frontend api url>   #
 
 ## Deploy
 - Web: Vercel project `tip-jar` (team "pirut's projects"), root `apps/web`, production branch `main`, env `NEXT_PUBLIC_CONVEX_URL` = prod Convex URL, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
-- Mobile: EAS (`apps/mobile/eas.json`, profiles `preview` and `production`), env `EXPO_PUBLIC_CONVEX_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+- Mobile: EAS (`apps/mobile/eas.json`, profiles `preview` and `production`), env `EXPO_PUBLIC_CONVEX_URL`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and `EXPO_PUBLIC_TIP_ORIGIN`. Preview uses dev Convex/Clerk and a public website deployed against the same dev services; production uses the production services and tip.jrbussard.com. QR, crew, share and legal links must match the backend environment.
 - Work on branches and open PRs into `main`.
+
+- EAS preview website: `https://tip-jar-dev.testing.jrbussard.com` (separate Vercel project `tip-jar-dev`, dev Convex/Clerk only). Keep that website updated when changing QR-linked web flows. The main `tip-jar` project and its production data remain separate.

@@ -11,8 +11,10 @@
 import type * as crews from "../crews.js";
 import type * as earnings from "../earnings.js";
 import type * as helpers from "../helpers.js";
+import type * as lib_handles from "../lib/handles.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_split from "../lib/split.js";
+import type * as migrations from "../migrations.js";
 import type * as tips from "../tips.js";
 import type * as workers from "../workers.js";
 
@@ -26,8 +28,10 @@ declare const fullApi: ApiFromModules<{
   crews: typeof crews;
   earnings: typeof earnings;
   helpers: typeof helpers;
+  "lib/handles": typeof lib_handles;
   "lib/money": typeof lib_money;
   "lib/split": typeof lib_split;
+  migrations: typeof migrations;
   tips: typeof tips;
   workers: typeof workers;
 }>;

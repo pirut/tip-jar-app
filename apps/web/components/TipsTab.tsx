@@ -1,59 +1,94 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "@convex/_generated/api";
+import { IconCheck, IconCopy, IconPrint, IconShare } from "@/components/Icons";
 import { money2, time } from "@/lib/format";
+import { useDayStart } from "@/lib/useDayStart";
 
-export function TipsTab({ handle }: { handle: string }) {
-  const today = useQuery(api.tips.today);
+export function TipsTab({ handle, name }: { handle: string; name: string }) {
+  const dayStart = useDayStart();
+  const today = useQuery(api.tips.today, { dayStart });
   const [origin, setOrigin] = useState("https://tip.jrbussard.com");
-  const [copied, setCopied] = useState(false);
-  useEffect(() => setOrigin(window.location.origin), []);
+  const [copied, setCopied] = useState<"yes" | "no" | null>(null);
+  const [canShare, setCanShare] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    setCanShare(typeof navigator.share === "function");
+    return () => clearTimeout(copyTimer.current);
+  }, []);
   const link = `${origin}/${handle}`;
+  const display = link.replace(/^https?:\/\//, "");
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setCopied("yes");
     } catch {
-      /* clipboard blocked; the link is still visible to select */
+      setCopied("no");
+    }
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(null), 2500);
+  }
+
+  async function share() {
+    try {
+      await navigator.share({ title: `Tip ${name}`, url: link });
+    } catch {
+      /* the person closed the share sheet */
     }
   }
 
   return (
-    <div className="stack" style={{ gap: 18 }}>
-      <div className="stack" style={{ gap: 4 }}>
-        <span className="eyebrow">Tips today</span>
-        <div className="big">{today ? money2(today.totalCents) : "—"}</div>
-        {today && <span className="small muted">{today.count} tip{today.count === 1 ? "" : "s"}</span>}
-      </div>
-      <div className="card stack" style={{ alignItems: "center", textAlign: "center" }}>
-        <span className="eyebrow">Your tip QR code</span>
-        <div className="qr"><QRCodeSVG value={link} size={180} /></div>
-        <p className="small">Print it for your badge or stand. Guests scan it and pay with Apple Pay or Google Pay.</p>
-        <div className="row" style={{ flexWrap: "wrap", justifyContent: "center" }}>
-          <code className="small">{link.replace(/^https?:\/\//, "")}</code>
-          <button className="btn small" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+    <div className="dash">
+      <div className="dash-main">
+        <div className="stack" style={{ gap: 4 }}>
+          <h1 className="stat-head">Tips today <span className="demo-tag">Demo</span></h1>
+          {today ? <div className="amount">{money2(today.totalCents)}</div> : <div className="skel" style={{ width: 160, height: 40 }} />}
+          {today && (
+            <p className="small muted">
+              {today.count} tip{today.count === 1 ? "" : "s"}
+              {today.crewCents > 0 ? `, ${money2(today.crewCents)} to your crew pool` : ""}
+            </p>
+          )}
         </div>
-      </div>
-      <div className="stack" style={{ gap: 2 }}>
-        <span className="eyebrow">Recent</span>
-        {today && today.recent.length === 0 && <p className="muted small">No tips yet. Open your link to try a demo tip.</p>}
-        <div className="list">
-          {today?.recent.map((t) => (
-            <div className="item" key={t._id}>
-              <div className="stack" style={{ gap: 0 }}>
-                <span>{t.payerLabel} {t.demo && <span className="demo-tag">Demo</span>}</span>
-                <span className="small muted">{time(t.at)} · {t.source === "qr" ? "QR code" : "Tap to Pay"}{t.toCrew ? " · to crew pool" : ""}</span>
+        <section className="dash-recent">
+          <h2 className="sec-title">Recent</h2>
+          {today === undefined && <div className="skel" style={{ height: 120 }} />}
+          {today && today.recent.length === 0 && (
+            <p className="muted">No tips yet. <a className="link-text" href={link} target="_blank" rel="noreferrer">Open your link</a> to try a demo tip.</p>
+          )}
+          <div className="list">
+            {today?.recent.map((t) => (
+              <div className="item" key={t._id}>
+                <div className="stack grow" style={{ gap: 0 }}>
+                  <span className="row" style={{ gap: 6 }}>{t.payerLabel}{t.demo && <span className="demo-tag quiet">Demo</span>}</span>
+                  <span className="small muted">{time(t.at)}, {t.source === "qr" ? "QR code" : "Tap to Pay"}{t.toCrew ? ", to crew pool" : ""}</span>
+                </div>
+                <span className="item-amt">+{money2(t.netCents)}</span>
               </div>
-              <span className="amt">+{money2(t.netCents)}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </section>
       </div>
+      <aside className="dash-side">
+        <section className="qr-block print-badge">
+          <h2 className="t-sub no-print">Your tip QR code</h2>
+          <h2 className="t-page print-only">Tip {name}</h2>
+          <div className="qr"><QRCodeSVG value={link} size={168} title={`QR code for ${display}`} /></div>
+          <a className="qr-link" href={link} target="_blank" rel="noreferrer">{display}</a>
+          <p className="small muted no-print">Print it for your badge or stand. Guests scan it to tip, with no app.</p>
+          <div className="qr-actions no-print">
+            {canShare && <button className="btn" onClick={share}><IconShare size={18} />Share</button>}
+            <button className="btn" onClick={copy}>{copied === "yes" ? <IconCheck size={18} /> : <IconCopy size={18} />}{copied === "yes" ? "Copied" : "Copy link"}</button>
+            <button className="btn" onClick={() => window.print()}><IconPrint size={18} />Print</button>
+          </div>
+          <div className="no-print" role="status">{copied === "no" && <p className="small error">Couldn&apos;t copy. Press and hold the link instead.</p>}</div>
+        </section>
+      </aside>
     </div>
   );
 }

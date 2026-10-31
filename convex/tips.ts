@@ -1,9 +1,10 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { activeMembership, requireWorker, currentWorker, startOfToday } from "./helpers";
+import { activeMembership, requireWorker, currentWorker, resolveDayStart } from "./helpers";
 import { MAX_TIP_CENTS, MIN_TIP_CENTS, feesCents } from "./lib/money";
 
+const GUEST_TIPS_PER_MINUTE = 10;
 const DEMO_PAYERS = ["Apple Pay", "Google Pay", "Visa ••4242", "Mastercard ••4444", "Amex ••0005"];
 
 async function insertTip(
@@ -46,7 +47,16 @@ export const tipFromGuest = mutation({
       .withIndex("by_handle", (q) => q.eq("handle", handle.toLowerCase()))
       .unique();
     if (!worker) throw new ConvexError("We couldn't find that person.");
-    return await insertTip(ctx, worker, { amountCents, coverFees, source: "qr", payerLabel: "Apple Pay" });
+    // This mutation is public, so keep anyone from flooding a worker's ledger.
+    const recent = await ctx.db
+      .query("tips")
+      .withIndex("by_worker", (q) => q.eq("workerId", worker._id))
+      .order("desc")
+      .take(GUEST_TIPS_PER_MINUTE);
+    if (recent.length === GUEST_TIPS_PER_MINUTE && recent[recent.length - 1]._creationTime > Date.now() - 60_000) {
+      throw new ConvexError("Lots of tips just came in. Try again in a minute.");
+    }
+    return await insertTip(ctx, worker, { amountCents, coverFees, source: "qr", payerLabel: "Guest tip" });
   },
 });
 
@@ -61,11 +71,11 @@ export const recordTap = mutation({
 });
 
 export const today = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { dayStart: v.optional(v.number()) },
+  handler: async (ctx, { dayStart }) => {
     const worker = await currentWorker(ctx);
     if (!worker) return null;
-    const since = startOfToday();
+    const since = resolveDayStart(dayStart);
     const recent = await ctx.db
       .query("tips")
       .withIndex("by_worker", (q) => q.eq("workerId", worker._id))
@@ -74,6 +84,7 @@ export const today = query({
     const todays = recent.filter((t) => t._creationTime >= since);
     return {
       totalCents: todays.reduce((a, t) => a + t.netCents, 0),
+      crewCents: todays.filter((t) => t.crewId !== undefined).reduce((a, t) => a + t.netCents, 0),
       count: todays.length,
       recent: recent.slice(0, 15).map((t) => ({
         _id: t._id,

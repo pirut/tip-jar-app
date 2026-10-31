@@ -1,7 +1,7 @@
-import { ConvexError } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { currentWorker, requireWorker, startOfToday } from "./helpers";
+import { currentWorker, requireWorker, resolveDayStart } from "./helpers";
 import { instantFeeCents } from "./lib/money";
 
 const DAY = 86400000;
@@ -25,20 +25,25 @@ async function ledger(ctx: QueryCtx, workerId: Id<"workers">) {
 }
 
 export const summary = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { dayStart: v.optional(v.number()) },
+  handler: async (ctx, { dayStart }) => {
     const worker = await currentWorker(ctx);
     if (!worker) return null;
     const l = await ledger(ctx, worker._id);
     // Earned per day for the last 7 days: solo tips plus crew payouts, by day received.
-    const today = startOfToday();
+    const today = resolveDayStart(dayStart);
     const days = Array.from({ length: 7 }, (_, i) => ({ start: today - (6 - i) * DAY, cents: 0 }));
     const add = (at: number, cents: number) => {
       const d = days.find((x) => at >= x.start && at < x.start + DAY);
       if (d) d.cents += cents;
     };
     for (const t of l.tips) if (t.crewId === undefined) add(t._creationTime, t.netCents);
-    for (const m of l.memberships) if (m.payoutCents !== undefined && m.leftAt) add(m.leftAt, m.payoutCents);
+    // Crews stay open 24 hours at most, so anyone who left before that can't land on the chart.
+    const paid = l.memberships.filter((m) => m.payoutCents !== undefined && m.leftAt !== undefined && m.leftAt >= days[0].start - DAY);
+    for (const m of paid) {
+      const crew = await ctx.db.get(m.crewId);
+      add(crew?.closedAt ?? m.leftAt!, m.payoutCents!);
+    }
     return {
       balanceCents: l.balanceCents,
       pendingCrewCents: l.pendingCrewCents,

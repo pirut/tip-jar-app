@@ -29,6 +29,18 @@ export function splitCents(pool: number, weights: number[], start = 0): number[]
   return out;
 }
 
+/**
+ * The weights a crew actually pays out with. A pool can't be split by weights that
+ * add up to nothing (an Hours crew closed within minutes, all shares at 0), and
+ * percents that don't add to 100 can't be trusted, so both fall back to even.
+ */
+export function effectiveWeights(mode: SplitMode, members: SplitMember[]): number[] {
+  const weights = weightsFor(mode, members);
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (total === 0 || (mode === "custom" && !customPercentsValid(members))) return members.map(() => 1);
+  return weights;
+}
+
 export function customPercentsValid(members: SplitMember[]): boolean {
   return members.reduce((a, m) => a + m.pct, 0) === 100;
 }
