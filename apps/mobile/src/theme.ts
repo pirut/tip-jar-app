@@ -2,7 +2,7 @@ import { useColorScheme } from "react-native";
 
 const light = {
   bg: "#eef1ec", surface: "#ffffff", sunk: "#e3e8e2", ink: "#14211b", muted: "#5b6b62", line: "#cfd8d1",
-  green: "#0f4a36", greenInk: "#ffffff", brass: "#b88a12", brassSoft: "#f5e9c4", good: "#1d7a4c", warn: "#a35a00",
+  green: "#0f4a36", greenInk: "#ffffff", brass: "#b88a12", brassSoft: "#f5e9c4", good: "#1d7a4c", warn: "#8f4e00",
   control: "#75857c", brassInk: "#7a5a08", segOn: "#ffffff", pool: "#0f4a36", poolInk: "#ffffff",
 };
 const dark: typeof light = {

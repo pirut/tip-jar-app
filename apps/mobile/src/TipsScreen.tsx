@@ -1,23 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, Share, Switch, Text, View } from "react-native";
+import { AccessibilityInfo, Animated, BackHandler, Pressable, Switch, Text, View, useWindowDimensions } from "react-native";
 import { useMutation, useQuery } from "convex/react";
 import QRCode from "react-native-qrcode-svg";
 import Svg, { Path } from "react-native-svg";
 import { api } from "../../../convex/_generated/api";
 import { MAX_TIP_CENTS, MIN_TIP_CENTS, PRESETS_CENTS, feesCents } from "../../../convex/lib/money";
-import { TIP_ORIGIN, entryCents, errorText, money, money2, time, typeKey } from "./format";
+import { TIP_ORIGIN, dateTime, entryCents, errorText, money, money2, time, typeKey } from "./format";
 import { useColors } from "./theme";
 import { useDayStart } from "./useDayStart";
-import { Banner, Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Row } from "./ui";
+import { Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Row, Success, announce, shareText } from "./ui";
 
 type Step = "home" | "amount" | "tap" | "qr";
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "del"];
+const KEY_ROWS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], [".", "0", "del"]];
 
-export function TipsScreen({ handle, name, onTipped }: { handle: string; name: string; onTipped: () => void }) {
+export function TipsScreen({ handle, name, inCrew, onFlowChange, onTipped }: { handle: string; name: string; inCrew: boolean; onFlowChange: (inFlow: boolean) => void; onTipped: () => void }) {
   const c = useColors();
   const dayStart = useDayStart();
   const today = useQuery(api.tips.today, { dayStart });
   const recordTap = useMutation(api.tips.recordTap);
+  const { height } = useWindowDimensions();
+  const compact = height < 700; // keeps the keypad and Charge button on one screen on small phones
   const [step, setStep] = useState<Step>("home");
   const [entry, setEntry] = useState("");
   const [cover, setCover] = useState(true);
@@ -26,8 +28,23 @@ export function TipsScreen({ handle, name, onTipped }: { handle: string; name: s
   const [busy, setBusy] = useState(false);
   const cents = entryCents(entry);
   const valid = cents >= MIN_TIP_CENTS && cents <= MAX_TIP_CENTS;
-  const charge = cents + (cover && cents ? feesCents(cents) : 0);
+  const fees = cents ? feesCents(cents) : 0;
+  const charge = cents + (cover ? fees : 0);
+  const net = cover ? cents : cents - fees;
   const link = `${TIP_ORIGIN}/${handle}`;
+
+  const exit = () => { setError(""); setStep("home"); };
+
+  useEffect(() => onFlowChange(step !== "home"), [step]);
+
+  useEffect(() => {
+    if (step === "home") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!busy) exit();
+      return true;
+    });
+    return () => sub.remove();
+  }, [step, busy]);
 
   // Tap to Pay: simulated until Stripe Terminal is wired in (needs a dev build and Apple's Tap to Pay entitlement).
   async function guestTapped() {
@@ -36,7 +53,9 @@ export function TipsScreen({ handle, name, onTipped }: { handle: string; name: s
     setBusy(true);
     try {
       await recordTap({ amountCents: cents, coverFees: cover });
-      setLast(`+${money2(cents)} tip recorded`);
+      const message = `+${money2(net)} recorded${inCrew ? ", in your crew pool" : ""}`;
+      setLast(message);
+      announce(`Demo tip: ${message}`);
       setStep("home");
       setEntry("");
       onTipped();
@@ -51,48 +70,57 @@ export function TipsScreen({ handle, name, onTipped }: { handle: string; name: s
     return (
       <View style={{ gap: 18, flex: 1, alignItems: "center", justifyContent: "center" }}>
         <Eyebrow>Your tip QR code</Eyebrow>
-        <View accessible accessibilityLabel={`QR code for your tip link, ${link}`} style={{ backgroundColor: "#fff", padding: 16, borderRadius: 16 }}>
+        <View accessible accessibilityRole="image" accessibilityLabel={`QR code for your tip link, ${link}`} style={{ backgroundColor: "#fff", padding: 16, borderRadius: 16 }}>
           <QRCode value={link} size={220} />
         </View>
         <Body style={{ textAlign: "center" }}>Guests scan it and tip in seconds, with no app.</Body>
         <Body small muted>{link.replace(/^https?:\/\//, "")}</Body>
-        <Btn kind="primary" title="Share my link" style={{ alignSelf: "stretch" }} onPress={() => Share.share({ message: `Tip ${name}: ${link}`, url: link })} />
-        <Btn kind="ghost" title="Done" onPress={() => setStep("home")} />
+        <Row><DemoTag /><Body muted small>The tip page is simulated. No card is charged.</Body></Row>
+        <Btn kind="primary" title="Share my link" style={{ alignSelf: "stretch" }} onPress={() => shareText(`Tip ${name}: ${link}`)} />
+        <Btn kind="ghost" title="Done" onPress={exit} />
       </View>
     );
 
   if (step === "amount")
     return (
-      <View style={{ gap: 14, flex: 1 }}>
+      <View style={{ gap: compact ? 10 : 14, flex: 1 }}>
         <Row style={{ justifyContent: "space-between" }}>
-          <Btn kind="ghost" title="Cancel" onPress={() => setStep("home")} />
-          <Eyebrow>Accept a tip</Eyebrow>
-          <View style={{ width: 60 }} />
+          <Btn kind="ghost" title="Cancel" style={{ paddingHorizontal: 0, minHeight: 44, paddingVertical: 8 }} onPress={exit} />
+          <Row style={{ gap: 6 }}><Eyebrow>Accept a tip</Eyebrow><DemoTag /></Row>
         </Row>
-        <View style={{ alignItems: "center" }} accessibilityLiveRegion="polite"><Big>{entry ? "$" + entry : "$0"}</Big></View>
+        <View style={{ alignItems: "center" }} accessibilityLiveRegion="polite"><Big size={compact ? 52 : 64}>{entry ? "$" + entry : "$0"}</Big></View>
         <Row style={{ justifyContent: "center" }}>
           {PRESETS_CENTS.map((p) => (
             <Pressable key={p} accessibilityRole="button" accessibilityState={{ selected: cents === p }} onPress={() => setEntry(String(p / 100))}
-              style={{ backgroundColor: cents === p ? c.green : c.brassSoft, borderRadius: 999, minHeight: 44, justifyContent: "center", paddingHorizontal: 20 }}>
-              <Text style={{ color: cents === p ? c.greenInk : c.ink, fontFamily: FONT.display, fontSize: 20 }}>{money(p)}</Text>
+              style={({ pressed }) => ({ flex: 1, alignItems: "center", backgroundColor: cents === p ? c.green : c.brassSoft, borderRadius: 999, minHeight: 44, justifyContent: "center", opacity: pressed ? 0.7 : 1 })}>
+              <Text maxFontSizeMultiplier={1.4} style={{ color: cents === p ? c.greenInk : c.ink, fontFamily: FONT.bodyBold, fontSize: 18 }}>{money(p)}</Text>
             </Pressable>
           ))}
         </Row>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {KEYS.map((k) => (
-            <Pressable key={k} accessibilityRole="button" onPress={() => setEntry((e) => typeKey(e, k))} accessibilityLabel={k === "del" ? "Delete" : k === "." ? "Decimal point" : k}
-              style={({ pressed }) => ({ width: "31.5%", minHeight: 54, justifyContent: "center", backgroundColor: c.sunk, borderRadius: 14, alignItems: "center", opacity: pressed ? 0.7 : 1 })}>
-              <Text style={{ fontSize: 22, fontFamily: FONT.bodyBold, color: c.ink }}>{k === "del" ? "⌫" : k}</Text>
-            </Pressable>
+        <View style={{ gap: 8 }}>
+          {KEY_ROWS.map((row) => (
+            <View key={row[0]} style={{ flexDirection: "row", gap: 8 }}>
+              {row.map((k) => (
+                <Pressable key={k} accessibilityRole="button" onPress={() => setEntry((e) => typeKey(e, k))} accessibilityLabel={k === "del" ? "Delete" : k === "." ? "Decimal point" : k}
+                  style={({ pressed }) => ({ flex: 1, minHeight: compact ? 46 : 54, justifyContent: "center", backgroundColor: c.sunk, borderRadius: 14, alignItems: "center", opacity: pressed ? 0.7 : 1 })}>
+                  {k === "del"
+                    ? <Svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke={c.ink} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><Path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7 6-7Zm3 4 5 6m0-6-5 6" /></Svg>
+                    : <Text maxFontSizeMultiplier={1.4} style={{ fontSize: 22, fontFamily: FONT.bodyBold, color: c.ink }}>{k}</Text>}
+                </Pressable>
+              ))}
+            </View>
           ))}
         </View>
-        <Row style={{ backgroundColor: c.sunk, borderRadius: 14, padding: 12, justifyContent: "space-between" }}>
-          <Body small style={{ flex: 1 }}>Guest covers the {cents ? money2(feesCents(cents)) : ""} in fees</Body>
+        <Row style={{ justifyContent: "space-between" }}>
+          <View style={{ flex: 1 }}>
+            <Body small>Guest covers the {cents ? `${money2(fees)} in ` : ""}fees</Body>
+            {valid && <Body muted small>Guest pays {money2(charge)} · you get {money2(net)}</Body>}
+          </View>
           <Switch accessibilityLabel="Guest covers fees" value={cover} onValueChange={setCover} trackColor={{ true: c.green, false: c.control }} />
         </Row>
         {!!cents && !valid && <ErrorText>Tips can be {money(MIN_TIP_CENTS)} to {money(MAX_TIP_CENTS)}.</ErrorText>}
         <View style={{ marginTop: "auto" }}>
-          <Btn kind="primary" title={valid ? `Charge ${money2(charge)}` : "Enter an amount"} disabled={!valid} onPress={() => setStep("tap")} />
+          <Btn kind="primary" title={valid ? `Charge ${money2(charge)} (demo)` : "Enter an amount"} disabled={!valid} onPress={() => setStep("tap")} />
         </View>
       </View>
     );
@@ -109,7 +137,7 @@ export function TipsScreen({ handle, name, onTipped }: { handle: string; name: s
         </View>
         <ErrorText>{error}</ErrorText>
         <Btn kind="primary" title={busy ? "Recording…" : "Simulate guest tap"} disabled={busy} onPress={guestTapped} />
-        <Btn kind="ghost" title="Cancel" onPress={() => setStep("home")} />
+        <Btn kind="ghost" title="Cancel" disabled={busy} onPress={exit} />
       </View>
     );
 
@@ -120,17 +148,18 @@ export function TipsScreen({ handle, name, onTipped }: { handle: string; name: s
         <Big>{today ? money2(today.totalCents) : "—"}</Big>
         {today && today.crewCents > 0 && <Body muted small>{money2(today.crewCents)} went to your crew pool</Body>}
       </View>
-      {last ? <Banner><Row style={{ justifyContent: "space-between" }}><Body>{last}</Body><DemoTag /></Row></Banner> : null}
+      {last ? <Success demo>{last}</Success> : null}
       <Btn kind="primary" title="Accept a tip" onPress={() => { setLast(""); setEntry(""); setStep("amount"); }} style={{ paddingVertical: 28, borderRadius: 22 }} />
       <Btn title="Show my QR code" onPress={() => setStep("qr")} />
       <Card>
         <Eyebrow>Recent</Eyebrow>
-        {today?.recent.length === 0 && <Body muted small>No tips yet today.</Body>}
+        {today === undefined && <Body muted small>Loading…</Body>}
+        {today?.recent.length === 0 && <Body muted small>No tips yet. Accept one above, or show guests your QR code.</Body>}
         {today?.recent.slice(0, 8).map((t) => (
           <Row key={t._id} style={{ justifyContent: "space-between" }}>
             <View style={{ flexShrink: 1 }}>
-              <Row style={{ gap: 6 }}><Body>{t.payerLabel}</Body>{t.demo && <DemoTag />}</Row>
-              <Body muted small>{time(t.at)} · {t.source === "qr" ? "QR code" : "Tap to Pay"}{t.toCrew ? " · to crew pool" : ""}</Body>
+              <Body>{t.payerLabel}</Body>
+              <Body muted small>{t.at >= dayStart ? time(t.at) : dateTime(t.at)} · {t.source === "qr" ? "QR code" : "Tap to Pay"}{t.toCrew ? " · to crew pool" : ""}{t.demo ? " · Demo" : ""}</Body>
             </View>
             <Text style={{ color: c.ink, fontFamily: FONT.bodyBold, fontVariant: ["tabular-nums"] }}>+{money2(t.netCents)}</Text>
           </Row>
@@ -143,15 +172,22 @@ export function TipsScreen({ handle, name, onTipped }: { handle: string; name: s
 function Pulse() {
   const c = useColors();
   const v = useRef(new Animated.Value(0)).current;
+  const [still, setStill] = useState(false);
   useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((reduced) => { if (live) setStill(reduced); });
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (still) return;
     const loop = Animated.loop(Animated.timing(v, { toValue: 1, duration: 1600, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
-  }, [v]);
+  }, [v, still]);
   return (
-    <View style={{ width: 150, height: 150, alignItems: "center", justifyContent: "center" }}>
-      <Animated.View style={{ position: "absolute", width: 150, height: 150, borderRadius: 75, borderWidth: 3, borderColor: c.green,
-        opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }] }} />
+    <View accessibilityElementsHidden importantForAccessibility="no" style={{ width: 150, height: 150, alignItems: "center", justifyContent: "center" }}>
+      {!still && <Animated.View style={{ position: "absolute", width: 150, height: 150, borderRadius: 75, borderWidth: 3, borderColor: c.green,
+        opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }] }} />}
       <Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke={c.green} strokeWidth={2} strokeLinecap="round">
         <Path d="M6 9a5 5 0 0 1 0 6M10 6a10 10 0 0 1 0 12M14 3a15 15 0 0 1 0 18" />
       </Svg>

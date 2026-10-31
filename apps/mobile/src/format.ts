@@ -1,9 +1,13 @@
 export const money = (cents: number) => {
-  const s = (cents / 100).toFixed(2);
-  return "$" + (s.endsWith(".00") ? s.slice(0, -3) : s);
+  const s = money2(cents);
+  return s.endsWith(".00") ? s.slice(0, -3) : s;
 };
-export const money2 = (cents: number) => "$" + (cents / 100).toFixed(2);
+export const money2 = (cents: number) => {
+  const [whole, part] = (cents / 100).toFixed(2).split(".");
+  return `$${whole.replace(/\B(?=(\d{3})+$)/g, ",")}.${part}`;
+};
 export const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+export const dateTime = (ms: number) => `${new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" })}, ${time(ms)}`;
 export const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 export function typeKey(entry: string, key: string): string {
