@@ -1,12 +1,9 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
-import { ConvexReactClient } from "convex/react";
-import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { ConvexProvider } from "convex/react";
+import { convex } from "@/lib/convex";
 
-const url = process.env.NEXT_PUBLIC_CONVEX_URL;
-const convex = url ? new ConvexReactClient(url) : null;
-
+// Guests never sign in, so Clerk only loads under /app (see WorkerProviders).
 export function ConvexClientProvider({ children }: { children: React.ReactNode }) {
   if (!convex) {
     return (
@@ -16,5 +13,5 @@ export function ConvexClientProvider({ children }: { children: React.ReactNode }
       </main>
     );
   }
-  return <ConvexProviderWithClerk client={convex} useAuth={useAuth}>{children}</ConvexProviderWithClerk>;
+  return <ConvexProvider client={convex}>{children}</ConvexProvider>;
 }

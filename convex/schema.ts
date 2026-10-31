@@ -55,11 +55,22 @@ export default defineSchema({
     hoursOverride: v.optional(v.number()),
     shares: v.number(),
     pct: v.number(),
+    // Time from earlier stints, when someone leaves and rejoins the same crew.
+    priorMs: v.optional(v.number()),
+    // The starter took this person out of the crew. They aren't paid and can't rejoin.
+    removedAt: v.optional(v.number()),
     // Filled in when the crew closes.
     payoutCents: v.optional(v.number()),
   })
     .index("by_crew", ["crewId"])
     .index("by_worker", ["workerId"]),
+
+  // Wrong crew codes per worker. Codes are only 4 digits, so guesses have to be limited.
+  joinAttempts: defineTable({
+    workerId: v.id("workers"),
+    windowStart: v.number(),
+    fails: v.number(),
+  }).index("by_worker", ["workerId"]),
 
   cashouts: defineTable({
     workerId: v.id("workers"),

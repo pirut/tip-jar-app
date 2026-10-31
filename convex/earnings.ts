@@ -1,7 +1,7 @@
-import { ConvexError } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { currentWorker, requireWorker, startOfToday } from "./helpers";
+import { currentWorker, requireWorker, resolveDayStart } from "./helpers";
 import { instantFeeCents } from "./lib/money";
 
 const DAY = 86400000;
@@ -25,13 +25,13 @@ async function ledger(ctx: QueryCtx, workerId: Id<"workers">) {
 }
 
 export const summary = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { dayStart: v.optional(v.number()) },
+  handler: async (ctx, { dayStart }) => {
     const worker = await currentWorker(ctx);
     if (!worker) return null;
     const l = await ledger(ctx, worker._id);
     // Earned per day for the last 7 days: solo tips plus crew payouts, by day received.
-    const today = startOfToday();
+    const today = resolveDayStart(dayStart);
     const days = Array.from({ length: 7 }, (_, i) => ({ start: today - (6 - i) * DAY, cents: 0 }));
     const add = (at: number, cents: number) => {
       const d = days.find((x) => at >= x.start && at < x.start + DAY);

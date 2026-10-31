@@ -1,9 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { currentWorker } from "./helpers";
-
-const HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/;
-const RESERVED = new Set(["app", "api", "login", "signup", "admin", "settings", "about", "help"]);
+import { activeMembership, currentWorker, requireWorker } from "./helpers";
+import { handleError } from "./lib/handles";
 
 export const me = query({
   args: {},
@@ -24,16 +22,7 @@ export const byHandle = query({
       .withIndex("by_handle", (q) => q.eq("handle", handle.toLowerCase()))
       .unique();
     if (!worker) return null;
-    const membership = await ctx.db
-      .query("crewMembers")
-      .withIndex("by_worker", (q) => q.eq("workerId", worker._id))
-      .order("desc")
-      .first();
-    let inCrew = false;
-    if (membership && membership.leftAt === undefined) {
-      const crew = await ctx.db.get(membership.crewId);
-      inCrew = crew?.status === "open";
-    }
+    const inCrew = (await activeMembership(ctx, worker._id)) !== null;
     return {
       name: worker.name,
       handle: worker.handle,
@@ -57,9 +46,11 @@ export const saveProfile = mutation({
     const handle = args.handle.trim().toLowerCase();
     const name = args.name.trim();
     if (!name) throw new ConvexError("Add your name.");
-    if (!HANDLE_RE.test(handle) || RESERVED.has(handle)) {
-      throw new ConvexError("Pick a link name of 3–30 letters, numbers or dashes.");
+    if (name.length > 60 || args.jobTitle.length > 60 || args.workplace.length > 80) {
+      throw new ConvexError("That's a bit long. Please shorten it.");
     }
+    const invalid = handleError(handle);
+    if (invalid) throw new ConvexError(invalid);
     const taken = await ctx.db
       .query("workers")
       .withIndex("by_handle", (q) => q.eq("handle", handle))
@@ -72,5 +63,24 @@ export const saveProfile = mutation({
       return existing._id;
     }
     return await ctx.db.insert("workers", { tokenIdentifier: identity.tokenIdentifier, ...fields });
+  },
+});
+
+// Store rules require in-app account deletion. Crew history keeps the row, so other
+// people's payouts still add up; the name shows as "Someone" once the worker is gone.
+export const deleteAccount = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const worker = await requireWorker(ctx);
+    if (await activeMembership(ctx, worker._id)) {
+      throw new ConvexError("Leave or close your crew before deleting your account.");
+    }
+    for (const table of ["tips", "cashouts"] as const) {
+      const rows = await ctx.db.query(table).withIndex("by_worker", (q) => q.eq("workerId", worker._id)).collect();
+      for (const row of rows) await ctx.db.delete(row._id);
+    }
+    const attempts = await ctx.db.query("joinAttempts").withIndex("by_worker", (q) => q.eq("workerId", worker._id)).unique();
+    if (attempts) await ctx.db.delete(attempts._id);
+    await ctx.db.delete(worker._id);
   },
 });

@@ -20,3 +20,4 @@ export function errorText(e: unknown): string {
   const data = (e as { data?: unknown })?.data;
   return typeof data === "string" ? data : "Something went wrong. Try again.";
 }
+export const TIP_ORIGIN = "https://tip.jrbussard.com";

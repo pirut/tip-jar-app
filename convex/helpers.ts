@@ -35,8 +35,11 @@ export async function activeMembership(
   return null;
 }
 
-export function startOfToday(now = Date.now()): number {
+// The start of the worker's day. Only their device knows their time zone, so clients
+// pass it in. Anything implausible falls back to midnight UTC.
+export function resolveDayStart(dayStart: number | undefined, now = Date.now()): number {
+  if (dayStart !== undefined && Number.isFinite(dayStart) && Math.abs(now - dayStart) <= 36 * 60 * 60 * 1000) return dayStart;
   const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
+  d.setUTCHours(0, 0, 0, 0);
   return d.getTime();
 }
