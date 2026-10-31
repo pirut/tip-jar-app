@@ -33,5 +33,7 @@ npx convex env set [--prod] CLERK_JWT_ISSUER_DOMAIN <clerk frontend api url>   #
 
 ## Deploy
 - Web: Vercel project `tip-jar` (team "pirut's projects"), root `apps/web`, production branch `main`, env `NEXT_PUBLIC_CONVEX_URL` = prod Convex URL, plus `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
-- Mobile: EAS (`apps/mobile/eas.json`, profiles `preview` and `production`), env `EXPO_PUBLIC_CONVEX_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+- Mobile: EAS (`apps/mobile/eas.json`, profiles `preview` and `production`), env `EXPO_PUBLIC_CONVEX_URL`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and `EXPO_PUBLIC_TIP_ORIGIN`. Preview uses dev Convex/Clerk and a public website deployed against the same dev services; production uses the production services and tip.jrbussard.com. QR, crew, share and legal links must match the backend environment.
 - Work on branches and open PRs into `main`.
+
+- EAS preview website: `https://tip-jar-dev.testing.jrbussard.com` (separate Vercel project `tip-jar-dev`, dev Convex/Clerk only). Keep that website updated when changing QR-linked web flows. The main `tip-jar` project and its production data remain separate.

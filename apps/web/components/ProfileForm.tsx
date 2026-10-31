@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { handleError } from "@convex/lib/handles";
@@ -19,6 +19,8 @@ type Props = {
 
 export function ProfileForm({ initial, email, onDone, onCancel, onSignOut, onDelete }: Props) {
   const save = useMutation(api.workers.saveProfile);
+  const [linkHost, setLinkHost] = useState("tip.jrbussard.com");
+  useEffect(() => { setLinkHost(window.location.host); }, []);
   const [p, setP] = useState<Profile>(initial ?? { name: "", handle: "", jobTitle: "Valet", workplace: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -69,7 +71,7 @@ export function ProfileForm({ initial, email, onDone, onCancel, onSignOut, onDel
         <div className="field">
           <label htmlFor="handle">Your link</label>
           <div className={handleProblem ? "prefixed invalid" : "prefixed"}>
-            <span>tip.jrbussard.com/</span>
+            <span title={linkHost} style={{ maxWidth: "60%", overflow: "hidden", textOverflow: "ellipsis" }}>{linkHost}/</span>
             <input id="handle" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={30} aria-invalid={!!handleProblem} aria-describedby="handle-note" value={p.handle} onBlur={() => setHandleTouched(true)} onChange={(e) => setP({ ...p, handle: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })} placeholder="marcus" required />
           </div>
           <div id="handle-note">
