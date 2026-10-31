@@ -84,7 +84,7 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
     return deleting ? <Loading label="Deleting your account…" /> : (
       <View style={{ gap: 14 }}>
         <Title>Your account is only partly deleted</Title>
-        <Body>Your Tip Jar profile, tips and cash-out history are deleted. Your sign-in account still exists, so this email can still sign in. If trying again keeps failing, sign out, sign back in, and choose Delete account on the setup screen.</Body>
+        <Body>Your Tip Jar profile, tips and cash-out history are deleted. Your sign-in account still exists, so this email can still sign in. If trying again keeps failing, sign out, sign back in, and choose Delete my sign-in account on the setup screen.</Body>
         <ErrorText>{deleteError}</ErrorText>
         <Btn kind="danger" title="Try again" onPress={() => deleteAccount(true)} />
         <Btn kind="ghost" title="Sign out" onPress={logOut} />
@@ -100,7 +100,7 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
       <Field label="Your name" value={p.name} maxLength={60} autoComplete="name" onChangeText={(name) => setP({ ...p, name })} />
       <Field label="Your link: tip.jrbussard.com/…" value={p.handle} maxLength={30} autoCapitalize="none" autoCorrect={false}
         onChangeText={(h) => setP({ ...p, handle: h.toLowerCase().replace(/[^a-z0-9-]/g, "") })} placeholder="marcus" />
-      {!!initial && initial.handle !== p.handle && <Body small style={{ color: c.warn }}>Changing your link breaks any QR codes you've already printed.</Body>}
+      {!!initial && initial.handle !== p.handle && <Body small style={{ color: c.demoInk }}>Changing your link breaks any QR codes you've already printed.</Body>}
       <Field label="Job" value={p.jobTitle} maxLength={60} onChangeText={(jobTitle) => setP({ ...p, jobTitle })} />
       <Field label="Where you work" value={p.workplace} maxLength={80} onChangeText={(workplace) => setP({ ...p, workplace })} placeholder="The Harbor Hotel" />
       <ErrorText>{error}</ErrorText>
@@ -115,12 +115,12 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
             ? "Delete your account, tips and cash-out history? This can't be undone."
             : "Delete your sign-in account? You have no Tip Jar profile yet, so that's all there is to remove. This can't be undone."}</Body>
           <ErrorText>{deleteError}</ErrorText>
-          <Btn kind="danger" title="Delete my account" onPress={() => deleteAccount(!initial)} />
+          <Btn kind="danger" title={initial ? "Delete my account" : "Delete my sign-in account"} onPress={() => deleteAccount(!initial)} />
           <Btn kind="ghost" title="Keep it" onPress={() => { setConfirmDelete(false); setDeleteError(""); }} />
         </Banner>
       ) : (
         <View style={{ gap: 4 }}>
-          <Btn kind="ghost" title="Delete account" disabled={!!crewBlock} onPress={() => setConfirmDelete(true)} />
+          <Btn kind="ghost" title={initial ? "Delete account" : "Delete my sign-in account"} disabled={!!crewBlock} onPress={() => setConfirmDelete(true)} />
           {!!crewBlock && <Body muted small style={{ textAlign: "center" }}>{crewBlock}</Body>}
         </View>
       )}

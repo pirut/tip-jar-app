@@ -190,32 +190,32 @@ function InCrew({ crew }: { crew: CrewData }) {
     if (!crew.splitValid && confirming === "close") setConfirming(null);
   }, [crew.splitValid, confirming]);
 
-  const heroButton = { minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 12, backgroundColor: "#ffffff26", paddingHorizontal: 12 } as const;
+  const heroButton = { minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 12, borderWidth: 1, borderColor: c.control, paddingHorizontal: 14 } as const;
 
   return (
     <View style={{ gap: 16 }}>
-      <View style={{ backgroundColor: c.pool, borderRadius: 20, padding: 18, gap: 6 }}>
-        <Row style={{ justifyContent: "space-between" }}><Eyebrow color={c.poolInk}>{crew.name}</Eyebrow><DemoTag /></Row>
-        <Big size={56} color={c.poolInk}>{money2(crew.poolCents)}</Big>
-        <Body small style={{ color: c.poolInk }}>in the pool · {activeCount} {activeCount === 1 ? "person" : "people"} · closes {time(crew.closesAt)}</Body>
+      <View style={{ gap: 6, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.line }}>
+        <Row style={{ justifyContent: "space-between" }}><Eyebrow>{crew.name}</Eyebrow><DemoTag /></Row>
+        <Big>{money2(crew.poolCents)}</Big>
+        <Body muted small>in the pool · {activeCount} {activeCount === 1 ? "person" : "people"} · closes {time(crew.closesAt)}</Body>
         <Row style={{ justifyContent: "space-between", marginTop: 10, flexWrap: "wrap" }}>
           <View>
-            <Eyebrow color={c.poolInk}>Join code</Eyebrow>
-            <Text accessibilityLabel={`Join code ${crew.code.split("").join(" ")}`} maxFontSizeMultiplier={1.4} style={{ color: c.poolInk, fontFamily: FONT.bodyBold, fontSize: 34, letterSpacing: 5, fontVariant: ["tabular-nums"] }}>{crew.code}</Text>
+            <Eyebrow>Join code</Eyebrow>
+            <Text accessibilityLabel={`Join code ${crew.code.split("").join(" ")}`} maxFontSizeMultiplier={1.4} style={{ color: c.ink, fontFamily: FONT.bodyBold, fontSize: 34, letterSpacing: 5, fontVariant: ["tabular-nums"] }}>{crew.code}</Text>
           </View>
           <Row>
             <Pressable accessibilityRole="button" accessibilityLabel="Share join code" onPress={() => shareText(`Join my Tip Jar crew with code ${crew.code}: ${joinLink}`)} style={({ pressed }) => [heroButton, { opacity: pressed ? 0.7 : 1 }]}>
-              <Text style={{ color: c.poolInk, fontFamily: FONT.bodyBold }}>Share</Text>
+              <Text style={{ color: c.ink, fontFamily: FONT.bodyBold }}>Share</Text>
             </Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={showQr ? "Hide join QR code" : "Show join QR code"} accessibilityState={{ expanded: showQr }} onPress={() => setShowQr(!showQr)} style={({ pressed }) => [heroButton, { opacity: pressed ? 0.7 : 1 }]}>
-              <Text style={{ color: c.poolInk, fontFamily: FONT.bodyBold }}>{showQr ? "Hide QR" : "QR"}</Text>
+              <Text style={{ color: c.ink, fontFamily: FONT.bodyBold }}>{showQr ? "Hide QR" : "QR"}</Text>
             </Pressable>
           </Row>
         </Row>
         {showQr && (
           <View style={{ alignItems: "center", gap: 8, marginTop: 8 }}>
             <View accessible accessibilityRole="image" accessibilityLabel="QR code to join this crew" style={{ backgroundColor: "#fff", padding: 12, borderRadius: 14 }}><QRCode value={joinLink} size={160} /></View>
-            <Body small style={{ color: c.poolInk, textAlign: "center" }}>Scanning opens Tip Jar on the web. In the app, enter the code instead.</Body>
+            <Body muted small style={{ textAlign: "center" }}>Scanning opens Tip Jar on the web. In the app, enter the code instead.</Body>
           </View>
         )}
       </View>

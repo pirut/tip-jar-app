@@ -7,7 +7,6 @@ import { TIP_ORIGIN, initials } from "./format";
 import { useColors } from "./theme";
 
 export const FONT = {
-  display: "BigShoulders_800ExtraBold",
   body: "InstrumentSans_400Regular",
   bodyBold: "InstrumentSans_600SemiBold",
 };
@@ -26,8 +25,8 @@ export function Btn({ title, onPress, kind = "plain", disabled, style, role = "b
   title: string; onPress: () => void; kind?: "plain" | "primary" | "dark" | "ghost" | "danger"; disabled?: boolean; style?: ViewStyle; role?: "button" | "link"; label?: string; hint?: string;
 }) {
   const c = useColors();
-  const bg = kind === "primary" ? c.green : kind === "dark" ? c.ink : kind === "danger" ? c.warn : kind === "ghost" ? "transparent" : c.sunk;
-  const fg = kind === "primary" ? c.greenInk : kind === "dark" ? c.surface : kind === "danger" ? c.bg : kind === "ghost" ? c.muted : c.ink;
+  const bg = kind === "primary" ? c.green : kind === "dark" ? c.ink : kind === "danger" ? c.danger : kind === "ghost" ? "transparent" : c.sunk;
+  const fg = kind === "primary" ? c.greenInk : kind === "dark" ? c.surface : kind === "danger" ? c.dangerInk : kind === "ghost" ? c.muted : c.ink;
   return (
     <Pressable
       accessibilityRole={role}
@@ -88,14 +87,14 @@ export function Eyebrow({ children, color }: { children: ReactNode; color?: stri
 }
 
 // Money stays on one line: it shrinks to fit rather than wrapping mid-amount.
-export function Big({ children, size = 64, color }: { children: ReactNode; size?: number; color?: string }) {
+export function Big({ children, size = 48, color }: { children: ReactNode; size?: number; color?: string }) {
   const c = useColors();
-  return <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.4} style={{ fontSize: size, lineHeight: size * 1.05, fontFamily: FONT.display, color: color ?? c.ink, fontVariant: ["tabular-nums"] }}>{children}</Text>;
+  return <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.4} style={{ fontSize: size, lineHeight: size * 1.15, letterSpacing: size * -0.02, fontFamily: FONT.bodyBold, color: color ?? c.ink, fontVariant: ["tabular-nums"] }}>{children}</Text>;
 }
 
 export function Title({ children }: { children: ReactNode }) {
   const c = useColors();
-  return <Text accessibilityRole="header" maxFontSizeMultiplier={1.5} style={{ fontSize: 28, lineHeight: 31, fontFamily: FONT.display, color: c.ink, textTransform: "uppercase" }}>{children}</Text>;
+  return <Text accessibilityRole="header" maxFontSizeMultiplier={1.5} style={{ fontSize: 24, lineHeight: 29, letterSpacing: -0.4, fontFamily: FONT.bodyBold, color: c.ink }}>{children}</Text>;
 }
 
 export function Body({ children, muted, small, style }: { children: ReactNode; muted?: boolean; small?: boolean; style?: object }) {
@@ -107,7 +106,7 @@ export function ErrorText({ children }: { children: ReactNode }) {
   const c = useColors();
   const text = Children.toArray(children).join("");
   useEffect(() => announce(text), [text]);
-  return text ? <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.warn, fontFamily: FONT.bodyBold }}>{text}</Text> : null;
+  return text ? <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: c.danger, fontFamily: FONT.bodyBold }}>{text}</Text> : null;
 }
 
 export function Loading({ label = "Loading…" }: { label?: string }) {
@@ -122,7 +121,7 @@ export function Loading({ label = "Loading…" }: { label?: string }) {
 
 export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
   const c = useColors();
-  return <View style={[{ backgroundColor: c.surface, borderColor: c.line, borderWidth: 1, borderRadius: 18, padding: 16, gap: 10 }, style]}>{children}</View>;
+  return <View style={[{ backgroundColor: c.surface, borderColor: c.line, borderWidth: 1, borderRadius: 14, padding: 16, gap: 10 }, style]}>{children}</View>;
 }
 
 export function Row({ children, style }: { children: ReactNode; style?: ViewStyle }) {
@@ -132,8 +131,8 @@ export function Row({ children, style }: { children: ReactNode; style?: ViewStyl
 export function Avatar({ name, size = 34 }: { name: string; size?: number }) {
   const c = useColors();
   return (
-    <View accessibilityElementsHidden importantForAccessibility="no" style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.green, alignItems: "center", justifyContent: "center" }}>
-      <Text allowFontScaling={false} style={{ color: c.greenInk, fontFamily: FONT.bodyBold, fontSize: size * 0.38 }}>{initials(name)}</Text>
+    <View accessibilityElementsHidden importantForAccessibility="no" style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.soft, alignItems: "center", justifyContent: "center" }}>
+      <Text allowFontScaling={false} style={{ color: c.green, fontFamily: FONT.bodyBold, fontSize: size * 0.38 }}>{initials(name)}</Text>
     </View>
   );
 }
@@ -157,8 +156,8 @@ export function Seg<T extends string>({ options, value, onChange, disabled, labe
 export function DemoTag() {
   const c = useColors();
   return (
-    <View style={{ backgroundColor: c.warn, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 }}>
-      <Text maxFontSizeMultiplier={1.4} style={{ fontSize: 11, color: c.bg, fontFamily: FONT.bodyBold, letterSpacing: 0.4 }}>DEMO</Text>
+    <View style={{ backgroundColor: c.demoBg, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 }}>
+      <Text maxFontSizeMultiplier={1.4} style={{ fontSize: 12, color: c.demoInk, fontFamily: FONT.bodyBold }}>Demo</Text>
     </View>
   );
 }
@@ -167,8 +166,8 @@ export function DemoTag() {
 export function DemoBar() {
   const c = useColors();
   return (
-    <View accessibilityRole="text" style={{ backgroundColor: c.warn, paddingVertical: 6, paddingHorizontal: 12 }}>
-      <Text maxFontSizeMultiplier={1.5} style={{ color: c.bg, textAlign: "center", fontSize: 13, fontFamily: FONT.body }}><Text style={{ fontFamily: FONT.bodyBold }}>Demo mode </Text>No real money moves.</Text>
+    <View accessibilityRole="text" style={{ backgroundColor: c.demoBg, paddingVertical: 6, paddingHorizontal: 12 }}>
+      <Text maxFontSizeMultiplier={1.5} style={{ color: c.demoInk, textAlign: "center", fontSize: 13, fontFamily: FONT.body }}><Text style={{ fontFamily: FONT.bodyBold }}>Demo mode. </Text>No real money moves.</Text>
     </View>
   );
 }
@@ -194,7 +193,7 @@ export function ConnectionBar() {
 
 export function Banner({ children, style }: { children: ReactNode; style?: ViewStyle }) {
   const c = useColors();
-  return <View accessibilityLiveRegion="polite" style={[{ backgroundColor: c.brassSoft, borderRadius: 14, padding: 12, gap: 8 }, style]}>{children}</View>;
+  return <View accessibilityLiveRegion="polite" style={[{ backgroundColor: c.soft, borderRadius: 12, padding: 12, gap: 8 }, style]}>{children}</View>;
 }
 
 function CrashScreen({ onRetry }: { onRetry: () => void }) {
@@ -233,7 +232,7 @@ export function LegalLinks() {
 }
 
 const s = StyleSheet.create({
-  btn: { borderRadius: 16, minHeight: 50, paddingVertical: 13, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
+  btn: { borderRadius: 12, minHeight: 50, paddingVertical: 13, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
   btnText: { fontSize: 16, textAlign: "center", fontFamily: FONT.bodyBold },
   input: { borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 48, fontSize: 16, fontFamily: FONT.body },
 });

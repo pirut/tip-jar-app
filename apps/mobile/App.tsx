@@ -4,7 +4,6 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
-import { BigShoulders_800ExtraBold } from "@expo-google-fonts/big-shoulders";
 import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-google-fonts/instrument-sans";
 import Svg, { Path } from "react-native-svg";
 import { ConvexReactClient, useConvexAuth, useQuery } from "convex/react";
@@ -18,14 +17,14 @@ import { ProfileScreen } from "./src/ProfileScreen";
 import { TipsScreen } from "./src/TipsScreen";
 import { CrewScreen, useInCrew } from "./src/CrewScreen";
 import { EarningsScreen } from "./src/EarningsScreen";
-import { Avatar, Banner, Body, Btn, ConnectionBar, DemoBar, ErrorBoundary, FONT, Loading, Row, Success, Title, announce } from "./src/ui";
+import { Avatar, Banner, Body, Btn, ConnectionBar, DemoBar, ErrorBoundary, FONT, Loading, Row, Success, announce } from "./src/ui";
 
 SplashScreen.preventAutoHideAsync();
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, { unsavedChangesWarning: false });
 
 export default function App() {
-  const [fontsLoaded, fontError] = useFonts({ BigShoulders_800ExtraBold, InstrumentSans_400Regular, InstrumentSans_600SemiBold });
+  const [fontsLoaded, fontError] = useFonts({ InstrumentSans_400Regular, InstrumentSans_600SemiBold });
   useEffect(() => {
     if (fontsLoaded || fontError) SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
@@ -45,8 +44,8 @@ export default function App() {
 
 type Tab = "tips" | "crew" | "earn";
 const TABS: [Tab, string, string][] = [
-  ["tips", "Tips", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm3 6.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 2 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6.5V8m0 8v1.5"],
-  ["crew", "Crew", "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8c0-3 2.7-5 6-5s6 2 6 5m1-8a3 3 0 0 0 0-6m2 9c2 .6 3 2.2 3 5"],
+  ["tips", "Tips", "M5.5 6h13A2.5 2.5 0 0 1 21 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5v-8A2.5 2.5 0 0 1 5.5 6ZM3 10.5h18M16 15h2"],
+  ["crew", "Crew", "M9 4.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5ZM2.75 19.5c0-3.3 2.8-5.5 6.25-5.5s6.25 2.2 6.25 5.5M16 5a3.25 3.25 0 0 1 0 6.3M18 14.4c2 .7 3.25 2.5 3.25 5.1"],
   ["earn", "Earnings", "M5 20v-6m7 6V9m7 11V4"],
 ];
 
@@ -124,15 +123,15 @@ function Root() {
           </Row>
         )}
         {!!notice && !tipFlow && <Success>{notice}</Success>}
-        {askJoin && inCrew === false && !tipFlow && (
+        {tab === "tips" && <TipsScreen handle={w.handle} name={w.name} inCrew={!!inCrew} onFlowChange={setTipFlow} joinPrompt={askJoin && inCrew === false && (
           <Banner>
-            <Title>Join today's crew?</Title>
-            <Body>Pool tips with the people you're working with. Tips you already got stay yours.</Body>
-            <Btn kind="primary" title="Join or start a crew" onPress={() => { setAskJoin(false); setTab("crew"); }} />
-            <Btn kind="ghost" title="Not today" onPress={() => { setAskJoin(false); setDeclined(true); }} />
+            <Body>Join today's crew? Tips you already got stay yours.</Body>
+            <Row>
+              <Btn kind="primary" title="Join or start" style={{ flex: 1 }} onPress={() => { setAskJoin(false); setTab("crew"); }} />
+              <Btn kind="ghost" title="Not today" style={{ flex: 1 }} onPress={() => { setAskJoin(false); setDeclined(true); }} />
+            </Row>
           </Banner>
-        )}
-        {tab === "tips" && <TipsScreen handle={w.handle} name={w.name} inCrew={!!inCrew} onFlowChange={setTipFlow} onTipped={() => { if (inCrew === false && !declined) setAskJoin(true); }} />}
+        )} onTipped={() => { if (inCrew === false && !declined) setAskJoin(true); }} />}
         {tab === "crew" && <CrewScreen />}
         {tab === "earn" && <EarningsScreen />}
       </View>
@@ -148,7 +147,7 @@ function Root() {
       {/* iOS has the ScrollView lift the focused field itself; KeyboardAvoidingView covers Android's edge-to-edge window. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "android" ? "padding" : undefined}>
         <ScrollView ref={scroll} automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 18, paddingBottom: showTabs ? 18 : 18 + insets.bottom, gap: 18, flexGrow: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
-          {!signedInApp && <Text accessibilityRole="header" maxFontSizeMultiplier={1.5} style={{ fontSize: 26, fontFamily: FONT.display, color: c.ink, textTransform: "uppercase" }}>Tip Jar</Text>}
+          {!signedInApp && <Text accessibilityRole="header" maxFontSizeMultiplier={1.5} style={{ fontSize: 18, letterSpacing: -0.2, fontFamily: FONT.bodyBold, color: c.ink }}>Tip Jar</Text>}
           {content}
         </ScrollView>
       </KeyboardAvoidingView>

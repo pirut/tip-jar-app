@@ -13,7 +13,7 @@ import { Big, Body, Btn, Card, DemoTag, ErrorText, Eyebrow, FONT, Row, Success, 
 type Step = "home" | "amount" | "tap" | "qr";
 const KEY_ROWS = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], [".", "0", "del"]];
 
-export function TipsScreen({ handle, name, inCrew, onFlowChange, onTipped }: { handle: string; name: string; inCrew: boolean; onFlowChange: (inFlow: boolean) => void; onTipped: () => void }) {
+export function TipsScreen({ handle, name, inCrew, onFlowChange, joinPrompt, onTipped }: { handle: string; name: string; inCrew: boolean; onFlowChange: (inFlow: boolean) => void; joinPrompt: React.ReactNode; onTipped: () => void }) {
   const c = useColors();
   const dayStart = useDayStart();
   const today = useQuery(api.tips.today, { dayStart });
@@ -88,11 +88,11 @@ export function TipsScreen({ handle, name, inCrew, onFlowChange, onTipped }: { h
           <Btn kind="ghost" title="Cancel" style={{ paddingHorizontal: 0, minHeight: 44, paddingVertical: 8 }} onPress={exit} />
           <Row style={{ gap: 6 }}><Eyebrow>Accept a tip</Eyebrow><DemoTag /></Row>
         </Row>
-        <View style={{ alignItems: "center" }} accessibilityLiveRegion="polite"><Big size={compact ? 52 : 64}>{entry ? "$" + entry : "$0"}</Big></View>
+        <View style={{ alignItems: "center" }} accessibilityLiveRegion="polite"><Big size={compact ? 44 : 56}>{entry ? "$" + entry : "$0"}</Big></View>
         <Row style={{ justifyContent: "center" }}>
           {PRESETS_CENTS.map((p) => (
             <Pressable key={p} accessibilityRole="button" accessibilityState={{ selected: cents === p }} onPress={() => setEntry(String(p / 100))}
-              style={({ pressed }) => ({ flex: 1, alignItems: "center", backgroundColor: cents === p ? c.green : c.brassSoft, borderRadius: 999, minHeight: 44, justifyContent: "center", opacity: pressed ? 0.7 : 1 })}>
+              style={({ pressed }) => ({ flex: 1, alignItems: "center", backgroundColor: cents === p ? c.green : c.soft, borderRadius: 999, minHeight: 44, justifyContent: "center", opacity: pressed ? 0.7 : 1 })}>
               <Text maxFontSizeMultiplier={1.4} style={{ color: cents === p ? c.greenInk : c.ink, fontFamily: FONT.bodyBold, fontSize: 18 }}>{money(p)}</Text>
             </Pressable>
           ))}
@@ -149,7 +149,8 @@ export function TipsScreen({ handle, name, inCrew, onFlowChange, onTipped }: { h
         {today && today.crewCents > 0 && <Body muted small>{money2(today.crewCents)} went to your crew pool</Body>}
       </View>
       {last ? <Success demo>{last}</Success> : null}
-      <Btn kind="primary" title="Accept a tip" onPress={() => { setLast(""); setEntry(""); setStep("amount"); }} style={{ paddingVertical: 28, borderRadius: 22 }} />
+      {joinPrompt}
+      <Btn kind="primary" title="Accept a tip" onPress={() => { setLast(""); setEntry(""); setStep("amount"); }} style={{ paddingVertical: 24, borderRadius: 14 }} />
       <Btn title="Show my QR code" onPress={() => setStep("qr")} />
       <Card>
         <Eyebrow>Recent</Eyebrow>
