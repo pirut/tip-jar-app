@@ -349,6 +349,7 @@ test("money that doesn't match what we asked for is frozen and never paid out", 
     assert.notEqual(after.status, "succeeded");
   }
   assert.equal(allocs().length, 0);
+  assert.equal((await w.call(ops.status, null)).paymentsInReview.length, 3);
   const { workerLiabilityCents, feesCollectedCents, reviewHeldCents } = books();
   assert.equal(workerLiabilityCents, 0);
   assert.equal(feesCollectedCents, 0);
@@ -1219,4 +1220,23 @@ test("receipt reference is a full id that operators can look up", async () => {
   const receipt = await w.call(payments.guestReceipt, null, { sessionId: tip.stripeCheckoutSessionId });
   assert.equal(receipt.ticket, tip._id);
   assert.equal((await w.call(ops.findPayment, null, { reference: receipt.ticket }))._id, tip._id);
+});
+
+
+test("sandbox account compatibility mode cannot create live accounts", async () => {
+  const prior = { mode: process.env.STRIPE_MODE, key: process.env.STRIPE_SECRET_KEY, api: process.env.STRIPE_CONNECT_API, support: process.env.SUPPORT_EMAIL };
+  try {
+    await w.profile("live-fallback", "live-fallback");
+    await w.call(ops.enrollWorker, null, { handle: "live-fallback" });
+    process.env.STRIPE_MODE = "live";
+    process.env.STRIPE_SECRET_KEY = "sk_live_fake";
+    process.env.SUPPORT_EMAIL = "help@example.com";
+    process.env.STRIPE_CONNECT_API = "v1";
+    await assert.rejects(w.act(paymentsNode.startPayoutSetup, "live-fallback"), /sandbox only/);
+    assert.ok(!f.calls.some(c => c.includes("accounts.create")));
+  } finally {
+    for (const [key, value] of Object.entries({ STRIPE_MODE: prior.mode, STRIPE_SECRET_KEY: prior.key, STRIPE_CONNECT_API: prior.api, SUPPORT_EMAIL: prior.support })) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });

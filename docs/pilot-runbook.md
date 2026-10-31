@@ -30,7 +30,7 @@ Nothing in this list is done yet for live mode.
 
 ## Stripe key permissions
 
-A restricted key (`rk_`) with write access to: Checkout Sessions, PaymentIntents, Refunds, Transfers (including reversals), Accounts v2 and account links, login links, Balance Settings. Read access to: Balance, Balance transaction sources, Disputes, Charges, Events, Payouts, Top-ups. This list hasn't been tried as a real restricted key; the sandbox runs used the CLI's login. Try it in the sandbox first.
+A restricted key (`rk_`) with write access to: Checkout Sessions, PaymentIntents, Refunds, Transfers (including reversals), Accounts v2 and account links, login links, Balance Settings. Read access to: Balance, Balance transaction sources, Disputes, Charges, Events, Payouts, Top-ups. Enable the connected-account permissions column for Balance, Balance Settings and Payouts as well; those requests use a connected-account context. Balance Transactions and their expanded sources need read access. This list hasn't been tried as a real restricted key; the sandbox runs used the CLI's login. Try it in the sandbox first.
 
 ## Backend settings
 
@@ -73,8 +73,8 @@ stripe webhook_endpoints create --url https://<site>/stripe/connect-webhook -d c
 The order matters, because the web app calls functions that have to exist first.
 
 1. `npx convex deploy`, then `npx convex run --prod migrations:backfillHandleClaims`. Everything stays off: no `STRIPE_MODE` or controls yet means demo.
-2. Set the backend settings and webhooks.
-3. Deploy the web app.
+2. Set the backend settings, including `STRIPE_MODE`, before creating webhooks. Never use test mode on production. Events received with mode unset may be ignored permanently, so do not unset it as a normal stop switch.
+3. Deploy the web app. Update the separate `tip-jar-dev` project for dev QR testing; merging production web does not update that project. Verify `/payouts/return`, `/terms`, `/privacy`, a guest page and its support link in the matching environment.
 4. A new mobile build is needed for the new screens. No new native dependencies; ordinary EAS profiles work.
 
 ## Turning it on
@@ -90,7 +90,7 @@ An enrolled worker can't be in an open demo crew; have them close it first. Thei
 
 Default limits: $100 a tip, $500 per worker per day, $2,500 overall per day, held 24 hours before transfer. To change them: `ops:setControls '{"transferHoldHours":48}'`, or per worker with `perTipLimitCents` and `dailyLimitCents` on `ops:enrollWorker`.
 
-**First live test:** tip yourself $1 with your own card, watch it through to your bank, refund a second one. Do this before any real guest.
+**First live test:** after approval, complete a small owner-authorized payment and a separate refund, then follow the first payment through the transfer and bank payout. Do this before opening the pilot to guests. Allow the first-payout waiting period; it is not an immediate cash-out test.
 
 ## Every day
 
@@ -165,7 +165,7 @@ It's a snapshot, not a guarantee. Refunds and disputes after it come out of the 
 
 ## Worker support answers
 
-- **When do I get my money?** About a day on hold with us, then Stripe's settlement time, then the next Monday's payout. Roughly a week at worst. Earnings shows each stage.
+- **When do I get my money?** About a day on hold with us, then Stripe's settlement time, then the next Monday's payout. First payouts can take 7–14 days or longer for verification or risk checks; test-mode payments do not start the live first-payout clock. After that, the weekly schedule applies subject to Stripe availability and holds. Use the arrival dates Stripe provides; Earnings shows each stage. See https://support.stripe.com/express/questions/waiting-period-for-first-payout-on-stripe .
 - **Change my bank?** Earnings → Bank and tax details.
 - **Why did my tip go down?** A guest got a refund or disputed the charge.
 - **Delete my account?** Crews closed, tips delivered, Stripe balance at zero. Payment records are kept; demo records go.
@@ -194,3 +194,13 @@ The sandbox runs (`npm run test:sandbox`, `npm run test:probes`) use real Stripe
 | Timing of Stripe's reserve for a negative balance | About a minute in the sandbox. Live could differ. `negativeWorkerCents` covers the gap |
 | A restricted key with the permissions listed above | Sandbox runs used the CLI's login |
 | Platform profile, Accounts v2 and the negative-balance decision | Owner and Stripe; see "Before anyone real pays" |
+
+
+## Rollback without losing payment records
+
+- Stop new charges with `ops:setControls` while leaving Stripe mode and signed webhooks running so existing refunds, disputes and earned-money settlement can still be reconciled. Stop transfers separately only when the incident requires it.
+- Record the deployed commit and make a private Convex export before release. An export contains personal and payment data; do not store it in the repository or public artifacts.
+- Roll back compatible functions only, retaining the widened schema and every payment/ledger/reconciliation table. Old schemas may reject the new records. Before reverting, confirm the functions understand the recorded payment and payout-schedule states; otherwise roll forward with a correction.
+- Never run a snapshot import with `--replace` against a money-bearing deployment as a rollback shortcut. It can erase money records while Stripe retains the charges and transfers.
+- Reconcile current Stripe transactions after recovery, inspect unresolved alerts and withdrawal blockers, and reopen the pilot only after amounts and obligations agree. Keep owner withdrawals blocked during an incomplete reconciliation.
+- Check `ops:books` daily for the last reconciliation time. If it is older than 25 hours or incomplete, stop withdrawals and investigate the scheduler and webhook deliveries.

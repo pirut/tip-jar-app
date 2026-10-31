@@ -60,7 +60,11 @@ async function workerFor(ctx: ActionCtx) {
 // on in the Dashboard: the same recipient setup, written as v1 controller properties. Stripe stopped
 // accepting that on API versions after this one, so it can't be the route for new live accounts.
 const V1_ACCOUNTS_API_VERSION = "2026-07-29.dahlia";
-const useV1Accounts = () => process.env.STRIPE_CONNECT_API === "v1";
+const useV1Accounts = () => {
+  const enabled = process.env.STRIPE_CONNECT_API === "v1";
+  if (enabled && requireStripeConfig().mode !== "test") throw new ConvexError("The Accounts v1 compatibility option is sandbox only.");
+  return enabled;
+};
 
 async function readAccountStatus(stripeAccountId: string) {
   if (useV1Accounts()) return accountStatusV1(await stripe().accounts.retrieve(stripeAccountId));

@@ -154,7 +154,8 @@ export const status = internalQuery({
     const alerts = await ctx.db.query("opsAlerts").withIndex("by_resolved", (q) => q.eq("resolvedAt", undefined)).collect();
     const due = await ctx.db.query("allocations").withIndex("by_state_eligible", (q) => q.eq("state", "due")).take(500);
     const inFlight = await ctx.db.query("allocations").withIndex("by_state_eligible", (q) => q.eq("state", "in_flight")).take(100);
-    const review = (await ctx.db.query("tipPayments").withIndex("by_status", (q) => q.eq("status", "succeeded")).order("desc").take(1000)).filter((t) => t.reviewReason);
+    // Mismatched payments may never reach succeeded; show every review-held row.
+    const review = (await ctx.db.query("tipPayments").order("desc").collect()).filter((t) => t.reviewReason);
     const failedEvents = await ctx.db.query("stripeEvents").withIndex("by_status_next", (q) => q.eq("status", "failed")).take(50);
     const unexplained = await ctx.db.query("balanceTxns").withIndex("by_state", (q) => q.eq("state", "open")).take(50);
     const payees = await ctx.db.query("payeeAccounts").take(500);
