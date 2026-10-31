@@ -25,7 +25,12 @@
     },
     "plugins": [
       "expo-secure-store",
-      "@clerk/expo",
+      [
+        "@clerk/expo",
+        {
+          "appleSignIn": false
+        }
+      ],
       "expo-web-browser",
       "expo-font",
       [
