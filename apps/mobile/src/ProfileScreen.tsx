@@ -3,7 +3,7 @@ import { BackHandler, View } from "react-native";
 import { useMutation, useQuery } from "convex/react";
 import { useAuth, useUser } from "@clerk/expo";
 import { api } from "../../../convex/_generated/api";
-import { errorText, time } from "./format";
+import { TIP_ORIGIN, errorText, time } from "./format";
 import { useColors } from "./theme";
 import { Banner, Body, Btn, ErrorText, Field, LegalLinks, Loading, Title } from "./ui";
 
@@ -105,7 +105,7 @@ export function ProfileScreen({ initial, onDone, onCancel }: { initial?: Profile
     <View style={{ gap: 14 }}>
       <Title>{initial ? "Edit your profile" : "Set up your tip page"}</Title>
       <Field label="Your name" value={p.name} maxLength={60} autoComplete="name" onChangeText={(name) => setP({ ...p, name })} />
-      <Field label="Your link: tip.jrbussard.com/…" value={p.handle} maxLength={30} autoCapitalize="none" autoCorrect={false}
+      <Field label={`Your link: ${TIP_ORIGIN.replace(/^https?:\/\//, "")}/…`} value={p.handle} maxLength={30} autoCapitalize="none" autoCorrect={false}
         onChangeText={(h) => setP({ ...p, handle: h.toLowerCase().replace(/[^a-z0-9-]/g, "") })} placeholder="marcus" />
       {!!initial && initial.handle !== p.handle && <Body small style={{ color: c.demoInk }}>Changing your link breaks any QR codes you've already printed.</Body>}
       <Field label="Job" value={p.jobTitle} maxLength={60} onChangeText={(jobTitle) => setP({ ...p, jobTitle })} />

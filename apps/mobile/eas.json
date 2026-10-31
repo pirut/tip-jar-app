@@ -8,14 +8,16 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_CONVEX_URL": "https://hidden-pika-22.convex.cloud",
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Y2xvc2UtaGFyZS0yNDE2LmNsZXJrLmFjY291bnRzLmRldiQ"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Y2xvc2UtaGFyZS0yNDE2LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_TIP_ORIGIN": "https://tip-jar-dev.testing.jrbussard.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_CONVEX_URL": "https://flexible-peccary-490.convex.cloud",
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsudGlwLmpyYnVzc2FyZC5jb20k"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsudGlwLmpyYnVzc2FyZC5jb20k",
+        "EXPO_PUBLIC_TIP_ORIGIN": "https://tip.jrbussard.com"
       }
     }
   },
