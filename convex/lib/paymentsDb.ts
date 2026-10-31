@@ -3,7 +3,7 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { adjustmentPostings, allocationDue, allocationTargets, canReceive, entitlement, splitTipAmongMembers } from "./paymentRules";
-import { configuredMode, isLive } from "./stripeEnv";
+import { configuredMode, isLive, supportEmail } from "./stripeEnv";
 
 export async function getControls(ctx: QueryCtx): Promise<Doc<"paymentControls"> | null> {
   return await ctx.db.query("paymentControls").withIndex("by_key", (q) => q.eq("key", "global")).unique();
@@ -22,7 +22,7 @@ export async function payeeFor(ctx: QueryCtx, tokenIdentifier: string): Promise<
     .unique();
 }
 
-export type WorkerStage = "demo" | "suspended" | "paused" | "setup" | "action_needed" | "pending" | "frozen" | "ready";
+export type WorkerStage = "demo" | "suspended" | "paused" | "setup" | "action_needed" | "pending" | "rejected" | "frozen" | "ready";
 
 // Where a worker stands on taking real money. Everything but "demo" means demo tips are refused.
 export async function workerStage(ctx: QueryCtx, tokenIdentifier: string): Promise<{ stage: WorkerStage; payee: Doc<"payeeAccounts"> | null; enrollment: Doc<"pilotEnrollments"> | null }> {
@@ -30,9 +30,10 @@ export async function workerStage(ctx: QueryCtx, tokenIdentifier: string): Promi
   if (!enrollment) return { stage: "demo", payee: null, enrollment };
   const payee = await payeeFor(ctx, tokenIdentifier);
   if (enrollment.status === "suspended") return { stage: "suspended", payee, enrollment };
-  if (!configuredMode()) return { stage: "paused", payee, enrollment };
+  if (!configuredMode() || (configuredMode() === "live" && !supportEmail())) return { stage: "paused", payee, enrollment };
   if (!payee) return { stage: "setup", payee, enrollment };
   if (payee.frozenReason) return { stage: "frozen", payee, enrollment };
+  if (["rejected", "unsupported"].includes(payee.transfersStatus)) return { stage: "rejected", payee, enrollment };
   if (!canReceive(payee.transfersStatus)) return { stage: payee.requirementsDue > 0 ? "action_needed" : "pending", payee, enrollment };
   const controls = await getControls(ctx);
   if (!controls?.chargesEnabled) return { stage: "paused", payee, enrollment };

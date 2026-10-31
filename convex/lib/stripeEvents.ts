@@ -52,9 +52,11 @@ export function eventTarget(event: EventLike): EventTarget {
 export function accountStatus(account: any) {
   const balance = account?.configuration?.recipient?.capabilities?.stripe_balance;
   const entries: any[] = account?.requirements?.entries ?? [];
-  const due = entries.filter((e) => e?.minimum_deadline?.status !== "eventually_due");
+  const due = entries.filter((e) => e?.minimum_deadline?.status !== "eventually_due" && e?.awaiting_action_from !== "stripe");
+  const transfers = balance?.stripe_transfers;
+  const unresolvable = transfers?.status !== "active" && transfers?.status_details?.some((d: any) => d.resolution === "no_resolution");
   return {
-    transfersStatus: String(balance?.stripe_transfers?.status ?? "unknown"),
+    transfersStatus: unresolvable ? "rejected" : String(transfers?.status ?? "unknown"),
     payoutsStatus: String(balance?.payouts?.status ?? "unknown"),
     requirementsDue: due.length,
   };
@@ -64,7 +66,7 @@ export function accountStatus(account: any) {
 export function accountStatusV1(account: any) {
   const transfers = account?.capabilities?.transfers;
   return {
-    transfersStatus: transfers === "inactive" ? (account?.details_submitted ? "restricted" : "pending") : String(transfers ?? "unknown"),
+    transfersStatus: String(account?.requirements?.disabled_reason ?? "").startsWith("rejected.") ? "rejected" : transfers === "inactive" ? (account?.details_submitted ? "restricted" : "pending") : String(transfers ?? "unknown"),
     payoutsStatus: account?.payouts_enabled ? "active" : "restricted",
     requirementsDue: (account?.requirements?.currently_due ?? []).length,
   };

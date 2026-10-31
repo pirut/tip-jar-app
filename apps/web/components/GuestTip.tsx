@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { MAX_TIP_CENTS, MIN_TIP_CENTS, PRESETS_CENTS, feesCents } from "@convex/lib/money";
+import { SupportLink } from "./SupportLink";
 import { LegalLinks, Logo } from "@/components/Brand";
 import { DemoBar, TestBar } from "@/components/DemoBar";
 import { IconCheck, IconCrew } from "@/components/Icons";
@@ -61,11 +62,12 @@ function GuestPaid({ sessionId, worker, onTipAgain }: { sessionId: string; worke
               <div className="line"><span>Tip to {worker.name}</span><span>{money2(receipt.tipCents)}</span></div>
               {receipt.coveredFees && <div className="line"><span>Fees you covered</span><span>{money2(receipt.feesCents)}</span></div>}
               {receipt.refundedCents > 0 && <div className="line"><span>Refunded</span><span>−{money2(receipt.refundedCents)}</span></div>}
-              <div className="line"><span>Reference</span><span>{receipt.ticket}</span></div>
+              <div className="line"><span>Reference</span><span style={{ overflowWrap: "anywhere", minWidth: 0 }}>{receipt.ticket}</span></div>
               <div className="line total"><span>{receipt.testMode ? "Test charge, not real money" : "Charged"}</span><span>{money2(receipt.chargedCents)}</span></div>
             </div>
           )}
         </div>
+        <SupportLink reference={receipt?.ticket} />
         <button className="btn full" onClick={onTipAgain}>{paid ? "Tip again" : "Back to tip page"}</button>
         <div className="guest-foot"><LegalLinks /></div>
       </main>
@@ -183,7 +185,7 @@ function GuestTipForm({ handle, worker }: { handle: string; worker: Worker }) {
                 <span>{receipt.covered ? "Fees you'd cover" : `Fees from ${first}'s tip`}</span>
                 <span>{money2(receipt.feesCents)}</span>
               </div>
-              <div className="line"><span>Reference</span><span>{receipt.ticket}</span></div>
+              <div className="line"><span>Reference</span><span style={{ overflowWrap: "anywhere", minWidth: 0 }}>{receipt.ticket}</span></div>
               <div className="line total"><span>Would be charged</span><span>{money2(receipt.chargedCents)}</span></div>
             </div>
           </div>

@@ -12,8 +12,8 @@ process.env.STRIPE_CONNECT_WEBHOOK_SECRET = "whsec_connect";
 const { crews, earnings, ops, payments, paymentsNode, settlement, tips, workers, world, HOUR, DAY, MINUTE } = await import("./harness.ts");
 const { fakeStripe, FakeStripeError } = await import("./fakeStripe.ts");
 const { ledgerTotals, entitlement, allocationTargets, tipAmounts, planReversal, applyOwed, splitTipAmongMembers } = await import("../convex/lib/paymentRules.ts");
-const { keyMode, requireStripeConfig } = await import("../convex/lib/stripeEnv.ts");
-const { eventTarget, accountStatus } = await import("../convex/lib/stripeEvents.ts");
+const { keyMode, requireStripeConfig, supportEmail } = await import("../convex/lib/stripeEnv.ts");
+const { eventTarget, accountStatus, accountStatusV1 } = await import("../convex/lib/stripeEvents.ts");
 
 let f: ReturnType<typeof fakeStripe>;
 let w: ReturnType<typeof world>;
@@ -234,6 +234,7 @@ test("amounts are worked out on the server, and a bad amount never reaches Strip
   assert.equal(made.total, 1084);
   assert.equal(made.metadata.tipPaymentId, tip._id);
   assert.equal(made.params.payment_method_types, undefined, "dynamic payment methods");
+  assert.deepEqual(made.params.adaptive_pricing, { enabled: false }, "USD receipt must match checkout currency");
   assert.match(made.params.success_url, /^https:\/\/tips\.example\.com\/ann-a\?paid=/);
 });
 
@@ -1143,4 +1144,55 @@ test("an unconfigured deployment stays demo", async () => {
   await w.call(ops.enrollWorker, null, { handle: "ann-a" });
   assert.equal((await w.call(workers.byHandle, null, { handle: "ann-a" })).payments, "unavailable");
   process.env.STRIPE_MODE = saved;
+});
+
+
+test("Stripe-owned review requirements never send workers back through setup", () => {
+  const result = accountStatus({ configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "pending" } } } } }, requirements: { entries: [{ minimum_deadline: { status: "currently_due" }, awaiting_action_from: "stripe" }] } });
+  assert.equal(result.requirementsDue, 0);
+});
+
+test("rejected v1 accounts and unresolvable v2 capabilities are terminal", () => {
+  assert.equal(accountStatusV1({ capabilities: { transfers: "inactive" }, requirements: { disabled_reason: "rejected.fraud" } }).transfersStatus, "rejected");
+  assert.equal(accountStatus({ configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "restricted", status_details: [{ resolution: "no_resolution" }] } } } } } }).transfersStatus, "rejected");
+});
+
+test("first account rejection shows a rejected stage and alerts the operator", async () => {
+  await on();
+  await w.profile("rejected-worker", "rejected-worker");
+  await w.call(ops.enrollWorker, null, { handle: "rejected-worker" });
+  await w.act(paymentsNode.startPayoutSetup, "rejected-worker");
+  const payee = w.rows("payeeAccounts")[0];
+  await w.call(payments.applyAccountStatus, null, { stripeAccountId: payee.stripeAccountId, transfersStatus: "rejected", payoutsStatus: "restricted", requirementsDue: 0 });
+  assert.equal((await w.call(payments.status, "rejected-worker")).stage, "rejected");
+  assert.ok(w.rows("opsAlerts").some(a => a.kind === "account_restricted"));
+  await assert.rejects(checkout("rejected-worker"), /can't take tips/);
+});
+
+
+test("live charges cannot be enabled without a monitored support contact", async () => {
+  const oldMode = process.env.STRIPE_MODE;
+  const oldEmail = process.env.SUPPORT_EMAIL;
+  try {
+    process.env.STRIPE_MODE = "live";
+    delete process.env.SUPPORT_EMAIL;
+    await assert.rejects(on(), /SUPPORT_EMAIL/);
+    assert.equal(supportEmail("bad\r\nBcc: other@example.com"), null);
+    process.env.SUPPORT_EMAIL = "help@example.com";
+    await on();
+    assert.equal((await w.call(payments.supportInfo, null)).email, "help@example.com");
+  } finally {
+    process.env.STRIPE_MODE = oldMode;
+    if (oldEmail === undefined) delete process.env.SUPPORT_EMAIL; else process.env.SUPPORT_EMAIL = oldEmail;
+  }
+});
+
+test("receipt reference is a full id that operators can look up", async () => {
+  await on();
+  await pilot("reference-worker", "reference-worker");
+  await paidTip("reference-worker");
+  const tip = lastTip();
+  const receipt = await w.call(payments.guestReceipt, null, { sessionId: tip.stripeCheckoutSessionId });
+  assert.equal(receipt.ticket, tip._id);
+  assert.equal((await w.call(ops.findPayment, null, { reference: receipt.ticket }))._id, tip._id);
 });

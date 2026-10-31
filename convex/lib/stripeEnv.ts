@@ -33,3 +33,9 @@ export function tipOrigin(value = process.env.TIP_ORIGIN): string {
   if (!value || !/^https?:\/\/[^/]+$/.test(value)) throw new Error("TIP_ORIGIN must be an origin like https://tip.jrbussard.com");
   return value;
 }
+
+// Public contact only; never an API key or a bank detail.
+export function supportEmail(value = process.env.SUPPORT_EMAIL): string | null {
+  const email = value?.trim();
+  return email && /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}$/.test(email) ? email : null;
+}

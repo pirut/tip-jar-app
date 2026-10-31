@@ -18,7 +18,12 @@ import {
   snapshotProblems,
   tipAmounts,
 } from "./lib/paymentRules";
-import { configuredMode, isLive } from "./lib/stripeEnv";
+import { configuredMode, isLive, supportEmail } from "./lib/stripeEnv";
+
+export const supportInfo = query({
+  args: {},
+  handler: async () => ({ email: supportEmail() }),
+});
 
 const PAYMENTS_PER_MINUTE = 10;
 const MIN = 60 * 1000;
@@ -60,7 +65,7 @@ export const guestReceipt = query({
       coveredFees: tip.coveredFees,
       refundedCents: tip.refundedCents,
       testMode: !tip.livemode,
-      ticket: tip._id.slice(-6).toUpperCase(),
+      ticket: tip._id,
     };
   },
 });
@@ -344,7 +349,7 @@ export const applyAccountStatus = internalMutation({
   handler: async (ctx, { stripeAccountId, ...status }) => {
     const payee = await ctx.db.query("payeeAccounts").withIndex("by_stripe_account", (q) => q.eq("stripeAccountId", stripeAccountId)).unique();
     if (!payee) return null;
-    if (payee.transfersStatus === "active" && status.transfersStatus !== "active") {
+    if ((payee.transfersStatus === "active" && status.transfersStatus !== "active") || ["restricted", "rejected", "unsupported"].includes(status.transfersStatus)) {
       await raiseAlert(ctx, { kind: "account_restricted", severity: "warning", message: `Stripe restricted ${stripeAccountId}: ${status.transfersStatus}.`, ref: stripeAccountId });
     }
     await ctx.db.patch(payee._id, { ...status, syncedAt: Date.now() });

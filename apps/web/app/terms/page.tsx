@@ -1,3 +1,4 @@
+import { SupportLink } from "@/components/SupportLink";
 import type { Metadata } from "next";
 import { Logo, SiteFooter } from "@/components/Brand";
 
@@ -17,7 +18,8 @@ export default function Terms() {
         <p>Tip Jar is for people in the US who receive tips for their work. Use your real name, keep your account secure, and don&apos;t use the app to mislead guests or coworkers. Tips only: Tip Jar doesn&apos;t handle wages.</p>
         <h2>Tips and fees</h2>
         <p>Guests see the tip, the fees and the total before paying. If a guest covers the fees, the worker receives the full tip. If not, the fees come out of the tip. Fees are an estimate of card processing plus a 25¢ Tip Jar fee, and may differ slightly from what Stripe charges us.</p>
-        <p>Payments are processed by Stripe. Tip Jar is the seller on the guest&apos;s card statement. For refunds, contact us. Refunds are at our discretion and may be required by card network rules.</p>
+        <p>Payments are processed by Stripe. Tip Jar is the seller on the guest&apos;s card statement. For refunds, use our support link and include your payment reference. Refunds are at our discretion and may be required by card network rules.</p>
+        <p><SupportLink /></p>
         <h2>Getting paid</h2>
         <p>To receive real tips you agree to the Stripe Connected Account Agreement and complete Stripe&apos;s identity and bank checks. A tip stays in Tip Jar&apos;s Stripe account for a holding period, currently about a day, before it moves to your Stripe account. Stripe then pays out to your bank on a schedule, currently weekly. This is not an escrow or a bank account, and it earns no interest.</p>
         <p><b>Refunds and disputes.</b> If a guest gets a refund or wins a card dispute, we take the matching amount back from what you and your crew received, including by reducing later tips. We may pause transfers or payouts while something is being investigated.</p>

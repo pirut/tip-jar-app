@@ -42,6 +42,7 @@ A restricted key (`rk_`) with write access to: Checkout Sessions, PaymentIntents
 | `STRIPE_SECRET_KEY` | The restricted key. Its prefix has to match `STRIPE_MODE` or every call refuses |
 | `STRIPE_WEBHOOK_SECRET` | From the platform endpoint below |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | From the Connect endpoint below |
+| `SUPPORT_EMAIL` | A monitored support email, shown on receipts and legal pages. Required before live charges can be enabled |
 | `TIP_ORIGIN` | `https://tip-jar-dev.testing.jrbussard.com` on dev, `https://tip.jrbussard.com` on production |
 | `STRIPE_CONNECT_API` | Leave unset for anything live. `v1` is a test-only fallback for a sandbox without Accounts v2. It pins an older API version, and Stripe's current one rejects it |
 | `OPS_ALERT_WEBHOOK_URL` | Optional. Slack-style URL for alerts |
@@ -132,7 +133,9 @@ npx convex run paymentsNode:refundTip '{"tipPaymentId":"..."}'                  
 npx convex run paymentsNode:refundTip '{"tipPaymentId":"...","amountCents":500}'     # partial, of what the guest paid
 ```
 
-Find the payment in the Dashboard (its metadata has `tipPaymentId`) or from the guest's reference, which is the last 6 characters of that id. A refund made in the Dashboard works the same way: the webhook picks it up. Worker shares reduce automatically, and money already transferred is reversed. Stripe keeps its processing fee on a refund, so a full refund costs the platform about 60¢.
+Find the payment in the Dashboard (its metadata has `tipPaymentId`) or from the guest's reference, which is the full, case-sensitive payment id. Look up a reference with `npx convex run ops:findPayment '{"reference":"FULL_PAYMENT_ID"}'` (add `--prod` for production). The support link includes it in the email subject.
+
+A refund made in the Dashboard works the same way: the webhook picks it up. Worker shares reduce automatically, and money already transferred is reversed. Stripe keeps its processing fee on a refund, so a full refund costs the platform about 60¢.
 
 ## Getting your money out
 

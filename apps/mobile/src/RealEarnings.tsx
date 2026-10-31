@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { useAction, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -15,7 +15,8 @@ const PAYOUT_STATUS: Record<string, string> = { paid: "Paid", pending: "On the w
 const SETUP_TEXT: Record<string, { title: string; body: string; action?: string }> = {
   setup: { title: "Set up payouts", body: "Tips reach your bank through Stripe, our payments partner. Stripe asks for your identity and bank details on its secure page. Tip Jar never sees them.", action: "Set up payouts" },
   action_needed: { title: "Finish setting up payouts", body: "Stripe needs a bit more from you before you can take tips.", action: "Continue setup" },
-  pending: { title: "Stripe is checking your details", body: "This usually doesn't take long. You can't take tips until it's done.", action: "Check or update details" },
+  pending: { title: "Stripe is checking your details", body: "Stripe is reviewing your information. No action is needed unless Stripe asks for more details. You can't take tips until the review is complete.", action: "Check or update details" },
+  rejected: { title: "Stripe could not approve payouts", body: "You can't take tips through Tip Jar. Contact support for help; repeating setup will not resolve this." },
   frozen: { title: "Your payouts are on hold", body: "A refund or dispute needs attention, so money isn't moving to your account. Contact support." },
   suspended: { title: "Your account is paused", body: "You can't take tips right now. Contact support." },
   paused: { title: "Tips are paused", body: "We've paused tips for now. Money you've already earned is safe." },
@@ -28,6 +29,7 @@ export function PayoutSetupCard({ stage }: { stage: string }) {
   const refresh = useAction(api.paymentsNode.refreshPayoutStatus);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const support = useQuery(api.payments.supportInfo, {});
   const text = SETUP_TEXT[stage];
   if (!text) return null;
 
@@ -49,6 +51,7 @@ export function PayoutSetupCard({ stage }: { stage: string }) {
     <Banner>
       <Text accessibilityRole="header" style={{ fontFamily: FONT.bodyBold, fontSize: 16 }}>{text.title}</Text>
       <Body small>{text.body}</Body>
+      {support?.email && <Btn title="Contact support" onPress={() => { Linking.openURL(`mailto:${support.email}?subject=Tip%20Jar%20support`).catch(() => setError("Could not open your email app. Contact " + support.email)); }} />}
       <ErrorText>{error}</ErrorText>
       {text.action && <Btn kind="primary" title={busy ? "Opening Stripe…" : text.action} disabled={busy} onPress={open} />}
     </Banner>
@@ -106,7 +109,7 @@ export function RealEarnings() {
       <View style={{ gap: 4 }}>
         <Row><Eyebrow>Available in Stripe</Eyebrow>{r.testMode && <TestTag />}</Row>
         <Big>{r.availableCents === null ? "—" : money2(r.availableCents)}</Big>
-        <Body muted small>{r.payoutsPaused ? "Payouts are on hold." : "Pays out to your bank every Monday."}</Body>
+        <Body muted small>{r.payoutsPaused ? "Payouts are on hold." : r.payoutsStatus !== "active" ? "Bank payouts are not enabled yet. Check Bank and tax details." : "Pays out to your bank every Monday."}</Body>
       </View>
       <Card>
         {r.stripePendingCents !== null && line("On its way to available", money2(r.stripePendingCents))}

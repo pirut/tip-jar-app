@@ -103,6 +103,7 @@ export const real = query({
       crewPoolCents,
       owedCents: payee?.owedCents ?? 0,
       payoutsPaused: payee?.payoutsPaused ?? false,
+      payoutsStatus: payee?.payoutsStatus ?? null,
       week: days,
       payouts: payouts.map((p) => ({ id: p.stripePayoutId, amountCents: p.amountCents, status: p.status, arrivalDate: p.arrivalDate, failureMessage: p.failureMessage })),
       now,

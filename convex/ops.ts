@@ -1,6 +1,7 @@
 // Operator controls. All internal, so only someone with deploy access can run them:
 //   npx convex run ops:status
 // docs/pilot-runbook.md says when to use each.
+import { configuredMode, supportEmail } from "./lib/stripeEnv";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -35,6 +36,7 @@ export const setControls = internalMutation({
     for (const [key, value] of Object.entries(args)) {
       if (typeof value === "number" && !(Number.isInteger(value) && value >= 0)) throw new ConvexError(`${key} must be a whole number, zero or more.`);
     }
+    if (args.chargesEnabled && configuredMode() === "live" && !supportEmail()) throw new ConvexError("Configure a valid SUPPORT_EMAIL before enabling live payments.");
     const existing = await getControls(ctx);
     const fields = { ...args, updatedAt: Date.now() };
     if (existing) await ctx.db.patch(existing._id, fields);
@@ -196,5 +198,14 @@ export const saveReconciliation = internalMutation({
     if (args.differenceCents !== 0) {
       await raiseAlert(ctx, { kind: "books_difference", severity: "warning", message: `Stripe's balance differs from the books by ${args.differenceCents} cents. Check for Connect fees or manual activity.`, ref });
     }
+  },
+});
+
+// Receipts retain the full, case-sensitive payment id. Never guess a truncated reference.
+export const findPayment = internalQuery({
+  args: { reference: v.string() },
+  handler: async (ctx, { reference }) => {
+    const id = ctx.db.normalizeId("tipPayments", reference.trim());
+    return id ? await ctx.db.get(id) : null;
   },
 });

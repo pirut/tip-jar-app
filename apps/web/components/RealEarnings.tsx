@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAction, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { errorText, money2 } from "@/lib/format";
+import { SupportLink } from "./SupportLink";
 import { useDayStart } from "@/lib/useDayStart";
 
 const dayName = (ms: number, weekday: "narrow" | "long") => new Date(ms + 12 * 3600000).toLocaleDateString([], { weekday });
@@ -20,7 +21,8 @@ const PAYOUT_STATUS: Record<string, string> = {
 const SETUP_TEXT: Record<string, { title: string; body: string; action?: string }> = {
   setup: { title: "Set up payouts", body: "Tips reach your bank through Stripe, our payments partner. Stripe asks for your identity and bank details on its secure page. Tip Jar never sees them.", action: "Set up payouts" },
   action_needed: { title: "Finish setting up payouts", body: "Stripe needs a bit more from you before you can take tips.", action: "Continue setup" },
-  pending: { title: "Stripe is checking your details", body: "This usually doesn't take long. You can't take tips until it's done.", action: "Check or update details" },
+  pending: { title: "Stripe is checking your details", body: "Stripe is reviewing your information. No action is needed unless Stripe asks for more details. You can't take tips until the review is complete.", action: "Check or update details" },
+  rejected: { title: "Stripe could not approve payouts", body: "You can't take tips through Tip Jar. Contact support for help; repeating setup will not resolve this." },
   frozen: { title: "Your payouts are on hold", body: "A refund or dispute needs attention, so money isn't moving to your account. Contact support." },
   suspended: { title: "Your account is paused", body: "You can't take tips right now. Contact support." },
   paused: { title: "Tips are paused", body: "We've paused tips for now. Money you've already earned is safe." },
@@ -50,6 +52,7 @@ export function PayoutSetupCard({ stage }: { stage: string }) {
     <section className="notice stack" style={{ gap: 8, textAlign: "left" }}>
       <h2 className="t-sub">{text.title}</h2>
       <p className="small">{text.body}</p>
+      <SupportLink />
       {error && <p className="error" role="alert">{error}</p>}
       {text.action && <button className="btn primary" style={{ alignSelf: "flex-start" }} disabled={busy} onClick={open}>{busy ? <><span className="spinner" aria-hidden />Opening Stripe…</> : text.action}</button>}
     </section>
@@ -100,7 +103,7 @@ export function RealEarnings() {
         <div className="stack" style={{ gap: 4 }}>
           <h1 className="stat-head">Available in Stripe {r.testMode && <span className="demo-tag">Test</span>}</h1>
           <div className="amount">{r.availableCents === null ? "—" : money2(r.availableCents)}</div>
-          <p className="small muted">{r.payoutsPaused ? "Payouts are on hold." : "Pays out to your bank every Monday."}</p>
+          <p className="small muted">{r.payoutsPaused ? "Payouts are on hold." : r.payoutsStatus !== "active" ? "Bank payouts are not enabled yet. Check Bank and tax details." : "Pays out to your bank every Monday."}</p>
         </div>
         <button className="btn" disabled={opening} onClick={openDashboard}>{opening ? <><span className="spinner" aria-hidden />Opening…</> : "Bank and tax details"}</button>
       </div>

@@ -11,7 +11,7 @@ import type { WorkerStage } from "./lib/paymentsDb";
 import type { PaymentSnapshot } from "./lib/paymentRules";
 import { safeToWithdraw, ledgerTotals } from "./lib/paymentRules";
 import { accountStatus, accountStatusV1, eventTarget, usdCents, type EventTarget } from "./lib/stripeEvents";
-import { isLive, requireStripeConfig, tipOrigin } from "./lib/stripeEnv";
+import { isLive, requireStripeConfig, supportEmail, tipOrigin } from "./lib/stripeEnv";
 
 let fake: Stripe | null = null;
 // Tests hand in a stand-in here. Nothing in a deployed app calls this.
@@ -210,6 +210,7 @@ async function confirmReceivable(ctx: ActionCtx, tipPaymentId: Id<"tipPayments">
 export const createGuestCheckout = action({
   args: { handle: v.string(), tipCents: v.number(), coverFees: v.boolean(), clientRequestId: v.string() },
   handler: async (ctx, { handle, tipCents, coverFees, clientRequestId }): Promise<{ url: string }> => {
+    if (requireStripeConfig().mode === "live" && !supportEmail()) throw new ConvexError("Payments are paused while support is being configured.");
     const target = await ctx.runQuery(internal.payments.guestTarget, { handle });
     if (!target) throw new ConvexError("We couldn't find that person.");
     const r = await ctx.runMutation(internal.payments.reservePayment, { workerId: target.workerId, tipCents, coverFees, clientRequestId });
@@ -223,6 +224,7 @@ export const createGuestCheckout = action({
     const session = await stripe().checkout.sessions.create(
       {
         mode: "payment",
+        adaptive_pricing: { enabled: false },
         line_items: [
           line(`Tip for ${target.firstName}`, r.chargedCents - (coverFees ? r.feesCents : 0)),
           ...(coverFees ? [line("Card and service fees", r.feesCents)] : []),
